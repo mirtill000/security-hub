@@ -96,6 +96,11 @@ body.in-report .content { display: none; }
 body.in-report { overflow: hidden; }
 tr[data-go] { cursor: pointer; }
 @media (max-width: 860px) { .rep-frame { height: calc(100vh - 110px); } body.in-report { overflow: auto; } }
+/* data freshness */
+.fresh { display: block; font-size: 12px; color: var(--faint); margin-top: 2px; }
+.fresh.stale { color: var(--warn-text); font-weight: 600; }
+.stale-banner { padding: 12px 18px; margin-bottom: 16px; border-color: color-mix(in srgb, var(--warn) 55%, transparent);
+  background: color-mix(in srgb, var(--warn) 10%, var(--panel)); font-size: 13.5px; }
 /* assets */
 .asset-grid { max-height: none; min-height: 0; }
 .asset-grid td { vertical-align: top; }

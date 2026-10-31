@@ -19,13 +19,15 @@ const ST = {
 };
 const ST_ORDER = ['valid', 'partial', 'warning', 'misconfigured', 'error', 'bogus', 'missing', 'null', 'na', 'dns_error', 'unknown', 'skipped'];
 const TIER_ORDER = ['critical', 'high', 'medium', 'low'];
-const SHORT = {'mta-sts': 'STS', 'tls-rpt': 'TLS', takeover: 'Deps', consistency: 'Sync', lookalikes: 'Look'};
+const SHORT = {'mta-sts': 'STS', 'tls-rpt': 'TLS', takeover: 'Deps', axfr: 'XFR', consistency: 'Sync', lookalikes: 'Look'};
 const DETAIL = {
   mx: r => r.mx.total_count ? `${r.mx.protected_count}/${r.mx.total_count} protected` : '',
   spf: r => r.spf.record ? `${r.spf.lookups}/10 lookups` : '',
   dkim: r => r.dkim.total_selectors ? `${r.dkim.valid_selectors} key${r.dkim.valid_selectors === 1 ? '' : 's'}` : '',
   dmarc: r => r.dmarc.policy ? `p=${r.dmarc.policy}` : '',
   'mta-sts': r => r.mta_sts.mode ? `mode ${r.mta_sts.mode}` : '',
+  caa: r => r.caa.issuers.length ? (r.caa.issuers[0] === ';' ? 'no CA allowed' : `${r.caa.issuers.length} CA${r.caa.issuers.length === 1 ? '' : 's'}`) : '',
+  axfr: r => r.axfr.servers.length ? `${r.axfr.servers.filter(s => s.result === 'open').length}/${r.axfr.servers.length} open` : '',
   takeover: r => r.takeover.dependencies.length ? `${r.takeover.dependencies.length} deps` : '',
   lookalikes: r => r.lookalikes.registered.length ? `${r.lookalikes.registered.length} found` : ''
 };
@@ -346,7 +348,7 @@ function reports() {
 }
 
 /* ================= domain drawer ================= */
-const EVIDENCE = ['mx', 'spf', 'dkim', 'dmarc', 'mta-sts', 'tls-rpt', 'bimi', 'dnssec'], EXPOSURE = ['takeover', 'consistency', 'lookalikes'];
+const EVIDENCE = ['mx', 'spf', 'dkim', 'dmarc', 'mta-sts', 'tls-rpt', 'bimi', 'dnssec', 'caa'], EXPOSURE = ['takeover', 'axfr', 'consistency', 'lookalikes'];
 const tabFor = c => EXPOSURE.includes(c) ? 'exposure' : 'evidence';
 const DTABS = [
   {id: 'overview', label: 'Summary', show: () => true},
@@ -415,6 +417,12 @@ function tabEvidence(r) {
   if (vis(r, 'bimi')) tr.push(kv('BIMI logo', r.bimi.logo_url || st(r.bimi.status)[2]));
   if (vis(r, 'dnssec')) tr.push(kv('DNSSEC', st(r.dnssec.status)[2]));
   if (tr.length) h += sec('mta-sts', 'Transport and DNS security', `<div class="kv">${tr.join('')}</div>`);
+  if (vis(r, 'caa')) { const c = r.caa;
+    h += sec('caa', 'Certificate authorities (CAA)', c.records.length ? `<table><thead><tr><th>Flags</th><th>Tag</th><th>Value</th></tr></thead><tbody>
+      ${c.records.map(x => `<tr><td class="num">${esc(x.flags)}</td><td class="mono">${esc(x.tag)}</td><td class="mono">${esc(x.value)}</td></tr>`).join('')}</tbody></table>
+      <div class="kv" style="margin-top:12px">${kv('May issue', c.issuers[0] === ';' ? 'No CA (issuance forbidden)' : c.issuers.join(', '))}${kv('Wildcards', c.wildcard_issuers ? (c.wildcard_issuers[0] === ';' ? 'Forbidden' : c.wildcard_issuers.join(', ')) : 'Same as above')}
+      ${kv('Violations reported to', c.iodef.join(', '))}${c.inherited_from ? kv('Inherited from', c.inherited_from) : ''}</div>`
+      : `<p class="muted">${c.status === 'dns_error' ? 'The CAA lookup failed: certificate authorities may refuse to issue.' : 'No CAA record: every public certificate authority may issue certificates for this domain.'}</p>`, pill(r._st('caa'))); }
   return h;
 }
 function tabExposure(r) {
@@ -425,6 +433,11 @@ function tabExposure(r) {
         <td>${pill({ok: 'valid', unregistered: 'error', expired: 'error', expiring: 'warning', 'no-dns': 'warning', unknown: 'unknown'}[e.state] || 'unknown', e.state === 'ok' ? '' : e.state)}</td><td class="nowrap num">${esc((e.expires || '').slice(0, 10))}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">No external dependencies found.</p>'}
       ${t.dangling.length ? `<p style="margin-top:14px"><b>Dangling CNAMEs</b></p>${t.dangling.map(d => `<div class="mono" style="margin-top:4px">${esc(d.name)} \u2192 ${esc(d.target)}</div>`).join('')}` : ''}
       <div class="kv" style="margin-top:14px">${kv('Name servers', t.ns_hosts.join(', '))}${kv('Domain expires', (t.domain_expires || '').slice(0, 10))}</div>`, pill(r._st('takeover'))); }
+  if (vis(r, 'axfr')) { const x = r.axfr;
+    h += sec('axfr', 'Zone transfer (AXFR)', `<p class="sub" style="margin-bottom:12px">Each authoritative name server was asked for a full copy of the zone. Only the first answer is read: the zone is not downloaded.</p>
+      ${x.servers.length ? `<table><thead><tr><th>Name server</th><th>Address</th><th>Result</th></tr></thead><tbody>${x.servers.map(s => `<tr><td class="mono">${esc(s.ns)}</td><td class="mono">${esc(s.ip || '')}</td>
+        <td>${pill({refused: 'valid', open: 'error', unreachable: 'unknown'}[s.result] || 'unknown', s.result === 'open' ? `open, ${s.records} records in the first message` : s.result)}</td></tr>`).join('')}</tbody></table>`
+      : '<p class="muted">No name server could be tested.</p>'}`, pill(r._st('axfr'))); }
   if (vis(r, 'consistency')) { const c = r.consistency;
     h += sec('consistency', 'Resolver and authoritative consistency', c.differences.length ? c.differences.map(d => `<p><b>${esc(d.type)} ${esc(d.name)}</b> <span class="sub">${d.kind === 'authoritative' ? 'authoritative servers disagree' : 'resolvers differ from the authoritative answer'}</span></p>
       <table style="margin:6px 0 14px"><tbody>${Object.entries(d.answers).map(([s, v]) => `<tr><td class="nowrap sub">${esc(s)}</td><td class="mono">${v.length ? v.map(esc).join('<br>') : '<span class="faint">no data</span>'}</td></tr>`).join('')}</tbody></table>`).join('')

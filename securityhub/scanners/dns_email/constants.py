@@ -145,6 +145,18 @@ FINDINGS: Dict[str, Tuple[str, str, str, str]] = {
 
 
 FINDINGS.update({
+    # CAA (RFC 8659): which certificate authorities may issue certificates for the domain
+    "CAA_MISSING": ("warning", "CAA", "No CAA record: any certificate authority may issue certificates for the domain",
+                    "Publish CAA records naming only the CAs you use (and 0 issue \";\" on domains that need no certificate)"),
+    "CAA_NO_IODEF": ("info", "CAA", "CAA without iodef: refused issuance requests are not reported",
+                     "Add 0 iodef \"mailto:security@<domain>\" so CAs can report requests that violate the policy"),
+    "CAA_INVALID": ("warning", "CAA", "CAA record malformed or with an unknown critical tag",
+                    "Fix the record: with an unknown critical tag (flag 128) CAs must refuse every certificate"),
+    "CAA_DNS_ERROR": ("warning", "CAA", "CAA lookup fails (SERVFAIL/timeout)",
+                      "Some DNS providers mishandle CAA queries: CAs treat a failed lookup as a reason to refuse issuance"),
+    # Zone transfer
+    "AXFR_OPEN": ("critical", "Zone transfer", "Zone transfer (AXFR) allowed to anyone",
+                  "Restrict zone transfers to the secondary name servers (allow-transfer / TSIG): the full zone is a reconnaissance map"),
     # DNS / registration
     "DNSSEC_BOGUS": ("critical", "DNSSEC", "DNSSEC validation fails (bogus signatures)",
                      "Fix the DS/DNSKEY chain or re-sign the zone - validating resolvers and MTAs cannot resolve this domain"),
@@ -208,6 +220,8 @@ FRAMEWORK_MAP: Dict[str, List[str]] = {
     "Lookalike": ["NIS2 Art.21(2)(b)", "ISO 27001 A.5.7"],
     "Consistency": ["ISO 27001 A.8.20"],
     "BIMI": [],
+    "CAA": ["NIS2 Art.21(2)(h)", "ISO 27001 A.8.24"],
+    "Zone transfer": ["NIS2 Art.21(2)(e)", "ISO 27001 A.8.20", "ISO 27001 A.8.22"],
 }
 
 
@@ -235,26 +249,28 @@ TIER_ALIASES = {
 # Selectable checks (--checks / --skip): name -> weight in the 0-100 score.
 # With a subset, the score is normalized over the selected weights.
 CHECKS: Dict[str, int] = {
-    "mx": 0, "spf": 25, "dkim": 25, "dmarc": 35, "mta-sts": 7, "tls-rpt": 3, "bimi": 0, "dnssec": 5,
-    "takeover": 0, "consistency": 0, "lookalikes": 0,
+    "mx": 0, "spf": 25, "dkim": 25, "dmarc": 35, "mta-sts": 7, "tls-rpt": 3, "bimi": 0, "dnssec": 5, "caa": 0,
+    "takeover": 0, "axfr": 0, "consistency": 0, "lookalikes": 0,
 }
-DEFAULT_CHECKS = ["mx", "spf", "dkim", "dmarc", "mta-sts", "tls-rpt", "bimi", "dnssec", "takeover"]
+# axfr is opt-in: it sends a zone transfer request to every authoritative name server (an active test).
+DEFAULT_CHECKS = ["mx", "spf", "dkim", "dmarc", "mta-sts", "tls-rpt", "bimi", "dnssec", "caa", "takeover"]
 CHECK_ALIASES = {
     "mtasts": "mta-sts", "mta_sts": "mta-sts", "sts": "mta-sts",
     "tlsrpt": "tls-rpt", "tls_rpt": "tls-rpt", "tls": "tls-rpt",
     "lookalike": "lookalikes", "typosquatting": "lookalikes", "rdap": "takeover",
+    "zone-transfer": "axfr", "zonetransfer": "axfr", "xfr": "axfr",
 }
 CHECK_LABELS = {"mx": "MX", "spf": "SPF", "dkim": "DKIM", "dmarc": "DMARC", "mta-sts": "MTA-STS",
-                "tls-rpt": "TLS-RPT", "bimi": "BIMI", "dnssec": "DNSSEC", "takeover": "Takeover",
-                "consistency": "Consistency", "lookalikes": "Lookalikes"}
+                "tls-rpt": "TLS-RPT", "bimi": "BIMI", "dnssec": "DNSSEC", "caa": "CAA", "takeover": "Takeover",
+                "axfr": "Zone transfer", "consistency": "Consistency", "lookalikes": "Lookalikes"}
 
 
 # Data other checks need: collected silently, never reported unless selected.
 # (MX is always collected in light mode: it decides whether the domain handles mail.)
 CHECK_DEPENDENCIES = {"bimi": {"dmarc"}, "takeover": {"spf", "dkim", "dmarc", "tls-rpt"}}
 CHECK_ATTRS = {"mx": "mx", "spf": "spf", "dkim": "dkim", "dmarc": "dmarc", "mta-sts": "mta_sts",
-               "tls-rpt": "tls_rpt", "bimi": "bimi", "dnssec": "dnssec", "takeover": "takeover",
-               "consistency": "consistency", "lookalikes": "lookalikes"}
+               "tls-rpt": "tls_rpt", "bimi": "bimi", "dnssec": "dnssec", "caa": "caa", "takeover": "takeover",
+               "axfr": "axfr", "consistency": "consistency", "lookalikes": "lookalikes"}
 
 
 # Findings that make "fully protected" impossible regardless of the other controls.

@@ -11,10 +11,13 @@ from .helpers import TempDirTest, fixture, silenced
 NOW = datetime(2026, 10, 31, tzinfo=timezone.utc)
 
 
-def dns_row(domain, policy="reject", tier="medium", profile="mail", takeover="valid", expires=None, score=90):
+def dns_row(domain, policy="reject", tier="medium", profile="mail", takeover="valid", expires=None, score=90,
+            dmarc_status=None, caa="valid", axfr_open=False):
     return {"domain": domain, "overall_score": score, "profile": profile, "tier": tier, "owner": "", "bu": "",
-            "dmarc": {"policy": policy, "pct": 100}, "spf": {"status": "valid"}, "mta_sts": {"status": "missing"},
-            "dnssec": {"status": "missing"}, "takeover": {"status": takeover, "domain_expires": expires}, "issues": []}
+            "dmarc": {"policy": policy, "pct": 100, "status": dmarc_status or ("valid" if policy in ("quarantine", "reject") else "misconfigured")},
+            "spf": {"status": "valid"}, "mta_sts": {"status": "missing"}, "dnssec": {"status": "missing"},
+            "caa": {"status": caa}, "axfr": {"status": "error" if axfr_open else "valid", "servers": [{"ns": "ns1." + domain, "result": "open"}] if axfr_open else []},
+            "takeover": {"status": takeover, "domain_expires": expires}, "issues": []}
 
 
 def waf_row(domain, profile="protected", blocking=True, days=400, codes=(), score=80):

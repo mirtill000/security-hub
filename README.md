@@ -5,7 +5,7 @@ Monitoraggio della **security posture** su tre aree, con un unico comando e un u
 | Area | Modulo | Cosa valuta | Sorgente dati |
 |------|--------|-------------|---------------|
 | **WAF** | `securityhub waf` (WAFGuard) | Configurazione Imperva Cloud WAF: onboarding, regole OWASP in blocco, eccezioni, allow-list, bot, DDoS, TLS, esposizione dell'origin | API Imperva (sola lettura) o snapshot JSON |
-| **DNS / E-mail** | `securityhub dns` (MailGuard DNS) | MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI, DNSSEC, takeover, lookalike, report DMARC aggregati | DNS live (+ RDAP, HTTPS per MTA-STS) |
+| **DNS / E-mail** | `securityhub dns` (MailGuard DNS) | MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI, DNSSEC, CAA, takeover, zone transfer (AXFR, opt-in), lookalike, report DMARC aggregati | DNS live (+ RDAP, HTTPS per MTA-STS) |
 | **Zero Trust** | `securityhub zta` (ZTAGuard) | Risultati del Microsoft Zero Trust Assessment per pilastro, priorità, quick win | `ZeroTrustAssessmentReport.json` |
 | **Portale** | `securityhub portal` (GuardHub) | Un solo file HTML con stato per area, KPI, piano d'azione trasversale, **vista per asset**, trend storici e i report navigabili | Report HTML generati dai moduli |
 
@@ -53,17 +53,18 @@ Security Hub run 2026-10-31T104144Z  ·  3 modules, up to 3 in parallel  ·  rep
   ✔ Imperva Cloud WAF (WAFGuard)             done                 2s
   ✔ DNS / e-mail security (MailGuard DNS)    done                41s
 
-SECURITY POSTURE   D   57/100
+SECURITY POSTURE   AT RISK   1 at risk · 2 need attention
+▲ Incomplete picture - stale: Microsoft Zero Trust
 ────────────────────────────────────────────────────────────────────────
-1 of 3 areas at risk, 2 need attention. Largest exposure: 3 of 5 websites (60%) are not effectively protected by the WAF.
+1 of 3 areas at risk, 2 need attention. Largest exposure: 3 of 5 verified websites (60%) are not effectively protected by the WAF.
 
-  Email and DNS security      C  67  Attention  2026-10-31
-                             1 of 3 domains (33%) can be impersonated by email
+  Email and DNS security      C  67  Attention    2026-10-31, today
+                             1 of 3 verified domains (33%) can be impersonated by email
                              · Domains protected against spoofing: 67%
-  Imperva Cloud WAF           F  49  At risk    2026-10-31
-                             3 of 5 websites (60%) are not effectively protected by the WAF
+  Imperva Cloud WAF           F  49  At risk      2026-10-31, today
+                             3 of 5 verified websites (60%) are not effectively protected by the WAF
                              · Websites effectively protected by the WAF: 40%
-  Microsoft Zero Trust        D  54  Attention  2026-10-01
+  Microsoft Zero Trust        D  54  Attention    2026-10-01, 30 days old ▲ stale (limit 20 days)
                              1 high-risk Zero Trust controls are failing
                              · Zero Trust controls passed: 54/100
 
@@ -73,9 +74,10 @@ Assets  4 assets · 3 at risk · 1 coverage gap · 2 expiring
   ✖ northwind.example            portal.northwind.example: certificate expired 669 days ago
 
 Top actions
-  critical Email and DNS security   Policy p=none - monitoring only, no protection
+  critical Email and DNS security   Zone transfer (AXFR) allowed to anyone
   critical Imperva Cloud WAF        Core WAF rule set to Ignore / disabled
   critical Microsoft Zero Trust     Privileged accounts use phishing-resistant MFA
+  critical Email and DNS security   Policy p=none - monitoring only, no protection
 
 Portal   reports/security_hub.html
 Summary  reports/posture.json
@@ -99,8 +101,12 @@ Per ogni asset vengono calcolati **segnali trasversali**, visibili solo incrocia
 | Dominio impersonabile | DMARC `none` o assente (critico per i domini di tier critical/high) |
 | Scadenze | certificato entro 30 giorni (critico entro 7) o scaduto; registrazione entro 60 giorni (critico entro 14) |
 | Lacuna di copertura | il dominio ospita siti protetti dal WAF ma non è nell'assessment DNS / e-mail |
+| Zone transfer aperto | un name server del dominio consegna l'intera zona a chiunque (controllo `axfr`) |
+| Siti senza CAA | il dominio ospita siti ma non limita le CA che possono emettere certificati |
+| Dati non verificati (info) | controlli non eseguiti o falliti: l'asset non risulta mai "on track" su dati parziali |
 
-Filtri rapidi (a rischio, attenzione, lacune di copertura, in scadenza), ricerca, scheda di dettaglio con link diretti
+Filtri rapidi (a rischio, attenzione, lacune di copertura, in scadenza, non verificati), ricerca, colonne ordinabili,
+paginazione (50 righe), scheda di dettaglio con link diretti
 alle righe dei report, card "Assets needing attention" nella panoramica e ricerca globale (`Ctrl K`).
 Lo stesso inventario è in `posture.json` (`assets.summary`, `assets.items`).
 
@@ -144,6 +150,15 @@ partono insieme (`max_parallel`, default: tutti; `1` = in sequenza) e l'output d
 Con `module_timeout` (o `timeout` per singolo modulo) un modulo che supera il tempo viene fermato e segnalato.
 Se un modulo fallisce, la console mostra le ultime righe del suo log.
 
+## Controlli DNS aggiuntivi
+
+- **CAA** (attivo di default, peso 0 sul punteggio): verifica quali certificate authority possono emettere certificati
+  per il dominio (RFC 8659, con risalita ai domini padre), la presenza di `iodef` e record malformati o con tag critici
+  sconosciuti. Suggerisce i record da pubblicare (`0 issue ";"` per i domini che non servono certificati).
+- **Zone transfer / AXFR** (opt-in: `--checks all,axfr`): chiede a ogni name server autoritativo una copia della zona.
+  È un test attivo verso server di terzi: va abilitato consapevolmente. Viene letta solo la prima risposta, la zona non
+  viene scaricata né salvata. Un server che la consegna genera il finding critico `AXFR_OPEN`.
+
 ## Tema chiaro / scuro
 
 Portale e report hanno tre modalità, scelte dal selettore in fondo alla barra laterale (su mobile: icone a fine barra)
@@ -164,7 +179,8 @@ tema del portale. La stampa e il PDF executive usano sempre la versione chiara.
 |------|-------------|
 | 0 | OK |
 | 1 | Errore di uso / input / API (anche se un solo modulo fallisce: gli altri vengono comunque eseguiti e il portale aggiornato) |
-| 2 | Punteggio sotto `fail_under` |
+| 2 | Punteggio sotto `fail_under` (di un modulo o di un'area) |
+| 3 | Solo `securityhub status --fail-stale`: i dati di un'area sono più vecchi del limite |
 | 130 | Interrotto |
 
 **cron** (ogni lunedì alle 07:40):
@@ -176,9 +192,24 @@ tema del portale. La stampa e il PDF executive usano sempre la versione chiara.
 **Windows Task Scheduler**: esegui prima `Invoke-ZtAssessment` (modulo PowerShell `ZeroTrustAssessment`),
 poi `securityhub run`, puntando `modules.zta.input` alla cartella del report.
 
-**posture.json** contiene punteggio e grado complessivi, stato per area (`good` / `warn` / `bad`), KPI
-(es. % domini protetti da spoofing, % siti realmente protetti dal WAF, % sign-in con MFA), azioni prioritarie
-e l'esito di ogni modulo dell'ultima esecuzione: può essere inviato a un SIEM o a una dashboard.
+**posture.json** (`"schema": 2`) contiene lo stato complessivo, lo stato per area (`good` / `warn` / `bad` /
+`unknown`), età dei dati e flag `stale`, KPI (es. % domini protetti da spoofing, % siti realmente protetti dal WAF,
+% sign-in con MFA), inventario asset, azioni prioritarie e l'esito di ogni modulo dell'ultima esecuzione: può essere
+inviato a un SIEM o a una dashboard.
+
+### Come leggere i numeri
+
+- **Non verificato non vuol dire esposto.** Un controllo non eseguito (es. `--checks spf`) o fallito (resolver DNS
+  irraggiungibile, errore API) rende il dato *non verificato*: è escluso dai KPI e dai titoli, segnalato a parte
+  ("N not verified") e un'area senza dati verificati risulta `unknown`, mai "a rischio" né "on track".
+- **Nessun voto medio fra aree.** I tre strumenti hanno scale diverse: lo stato complessivo (`overall.status`) è lo
+  stato peggiore fra le aree verificate, con i conteggi per stato; `overall.complete` è `false` se un'area non è
+  verificata o ha dati vecchi. *(Fino allo schema 1 c'era un `overall_score` medio: è stato rimosso.)*
+- **Freschezza.** Ogni area ha un limite di età dei dati (default: DNS e WAF 2 giorni, Zero Trust 35), configurabile
+  con `max_age_days` nella configurazione o `--max-age dns=1,zta=30`. Oltre il limite il portale mostra un avviso e
+  `securityhub status --fail-stale` termina con codice 3: utile per Nagios/Zabbix o come "dead man's switch".
+- **Esecuzioni sovrapposte.** Un lock sulla cartella di output impedisce due `run` contemporanei (il secondo termina
+  con un errore che indica chi tiene il lock); portale e `posture.json` sono scritti in modo atomico.
 
 ## Uso dei singoli moduli
 

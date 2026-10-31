@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from .common import EXIT_FAIL_UNDER, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE
+from .common import EXIT_FAIL_UNDER, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, LockBusy, RunLock, atomic_write
 from .console import Progress, Style, fmt_secs, print_posture
 
 # name -> (module, positional argument fed from `input`, human label)
@@ -63,6 +63,7 @@ keep_runs: 12                            # older run folders are deleted (0 = ke
 # fail_under: 70                         # exit code 2 if an area / asset scores below this
 # auto_baseline: true                    # compare every module with its previous run
 # max_parallel: 3                        # modules run at the same time (1 = one after the other)
+# max_age_days: {dns: 2, waf: 2, zta: 35}  # data older than this is flagged as stale in portal and summary
 # module_timeout: 3600                   # stop a module after this many seconds (per module: timeout)
 
 modules:
@@ -72,7 +73,7 @@ modules:
     # timeout: 7200                      # large portfolios with lookalikes can take long
     input: domains.csv                   # text (one domain per line) or CSV with tier/owner/bu/tags
     options:
-      checks: all,takeover               # add lookalikes,consistency for deeper (slower) scans
+      checks: all,takeover               # add axfr (active zone transfer test), lookalikes, consistency
       csv: true
       # dmarc_reports: [./rua]           # DMARC aggregate reports (.xml/.gz/.zip/.eml)
       # nameservers: [1.1.1.1, 8.8.8.8]
@@ -344,11 +345,18 @@ def run(config_path: str, only: Optional[List[str]] = None, dry_run: bool = Fals
     if parallel < 1:
         raise ConfigError("max_parallel must be 1 or more")
     default_timeout = timeout if timeout is not None else cfg.get("module_timeout")
+    max_age = cfg.get("max_age_days") or {}
+    if not isinstance(max_age, dict) or set(max_age) - set(ORDER):
+        raise ConfigError("max_age_days must map dns / waf / zta to a number of days")
+    try:
+        max_age = {k: float(v) for k, v in max_age.items()}
+    except (TypeError, ValueError):
+        raise ConfigError("max_age_days values must be numbers")
 
     previous = list_runs(out_dir)
     when = now or datetime.now(timezone.utc)
     stamp = when.strftime(RUN_FORMAT)
-    while os.path.exists(os.path.join(out_dir, RUNS_DIR, stamp)):  # two runs in the same second
+    while os.path.exists(os.path.join(out_dir, RUNS_DIR, stamp)):  # a run in the same second: next free name
         when += timedelta(seconds=1)
         stamp = when.strftime(RUN_FORMAT)
     run_dir = os.path.join(out_dir, RUNS_DIR, stamp)
@@ -369,7 +377,36 @@ def run(config_path: str, only: Optional[List[str]] = None, dry_run: bool = Fals
             print(f"securityhub {name} {' '.join(argv)}" + (f"    # timeout {fmt_secs(t)}" if t else ""))
         return EXIT_OK
 
-    os.makedirs(run_dir, exist_ok=True)
+    try:
+        lock = RunLock(out_dir).__enter__()
+    except LockBusy as e:
+        say(err(f"Error: {e}. Wait for it to finish (or remove a stale run with care).", "red"))
+        return EXIT_USAGE
+    try:
+        return _execute(cfg, plans, out_dir, stamp, when, run_dir, parallel, max_age, fail_under, quiet, verbose, say, err)
+    finally:
+        lock.__exit__(None, None, None)
+
+
+def _claim_run_dir(out_dir: str, stamp: str, when: datetime) -> Tuple[str, str]:
+    """Create the run folder; never reuse an existing one (another run in the same second)."""
+    while True:
+        run_dir = os.path.join(out_dir, RUNS_DIR, stamp)
+        try:
+            os.makedirs(run_dir)
+            return run_dir, stamp
+        except FileExistsError:
+            when += timedelta(seconds=1)
+            stamp = when.strftime(RUN_FORMAT)
+
+
+def _execute(cfg, plans, out_dir, stamp, when, run_dir, parallel, max_age, fail_under, quiet, verbose, say, err) -> int:
+    os.makedirs(os.path.join(out_dir, RUNS_DIR), exist_ok=True)
+    claimed, stamp = _claim_run_dir(out_dir, stamp, when)
+    if claimed != run_dir:  # the planned folder was taken meanwhile: move the outputs of every module
+        plans = [(n, os.path.join(claimed, os.path.basename(o)), [claimed + a[len(run_dir):] if a.startswith(run_dir) else a for a in argv], t)
+                 for n, o, argv, t in plans]
+        run_dir = claimed
     if not quiet:
         say(err("Security Hub", "bold") + f" run {stamp}  {err.dot}  {len(plans)} module{'s' if len(plans) != 1 else ''}"
             + (f", up to {min(parallel, len(plans))} in parallel" if parallel > 1 and len(plans) > 1 else "")
@@ -426,14 +463,13 @@ def run(config_path: str, only: Optional[List[str]] = None, dry_run: bool = Fals
     from . import portal
     reports, history = portal.collect(list_runs(out_dir))
     hub = os.path.join(out_dir, "security_hub.html")
-    portal.build_hub(reports, hub, str(cfg.get("title") or ""), history)
-    summary = portal.posture(reports, history)
+    portal.build_hub(reports, hub, str(cfg.get("title") or ""), history, max_age)
+    summary = portal.posture(reports, history, max_age)
     summary["run"] = {"id": stamp, "folder": run_dir, "max_parallel": parallel,
                       "modules": [{"module": r.name, "exit_code": r.code, "seconds": round(r.seconds, 1), "report": r.report,
                                    "log": r.log, "timed_out": r.timed_out, "error": r.error} for r in ordered]}
     posture_file = os.path.join(out_dir, "posture.json")
-    with open(posture_file, "w", encoding="utf-8") as f:
-        json.dump(summary, f, indent=2, ensure_ascii=False)
+    atomic_write(posture_file, json.dumps(summary, indent=2, ensure_ascii=False))
 
     print_posture(summary)
     out = Style(sys.stdout)
@@ -446,12 +482,16 @@ def run(config_path: str, only: Optional[List[str]] = None, dry_run: bool = Fals
         return EXIT_USAGE
     if any(r.code == EXIT_FAIL_UNDER for r in ordered):
         return EXIT_FAIL_UNDER
-    if fail_under is not None and summary.get("overall_score") is not None and summary["overall_score"] < fail_under:
+    if fail_under is not None and any(a.get("score") is not None and a["score"] < fail_under for a in summary["areas"]):
         return EXIT_FAIL_UNDER
     return EXIT_OK
 
 
-def status(inputs: List[str], json_out: Optional[str] = None, as_json: bool = False) -> int:
+EXIT_STALE = 3
+
+
+def status(inputs: List[str], json_out: Optional[str] = None, as_json: bool = False, max_age: str = "",
+           fail_stale: bool = False) -> int:
     from . import portal
     expanded = []
     for p in inputs:
@@ -461,13 +501,19 @@ def status(inputs: List[str], json_out: Optional[str] = None, as_json: bool = Fa
     if not reports:
         print("Error: no reports found", file=sys.stderr)
         return EXIT_USAGE
-    summary = portal.posture(reports, history)
+    try:
+        limits = portal.parse_max_age(max_age)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return EXIT_USAGE
+    summary = portal.posture(reports, history, limits)
     if json_out:
-        with open(json_out, "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
+        atomic_write(json_out, json.dumps(summary, indent=2, ensure_ascii=False))
     if as_json:
         json.dump(summary, sys.stdout, indent=2, ensure_ascii=False)
         print()
     else:
         print_posture(summary)
+    if fail_stale and summary["overall"]["stale"]:
+        return EXIT_STALE
     return EXIT_OK

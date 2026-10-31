@@ -30,7 +30,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from .common import EXIT_OK, EXIT_USAGE, Parser, grade, json_for_html
+from .common import EXIT_OK, EXIT_USAGE, Parser, atomic_write, grade, json_for_html
 from . import inventory, ui
 
 __version__ = "1.2.0"
@@ -40,6 +40,10 @@ TITLE_RE = re.compile(r"<title>(.*?)</title>", re.S | re.I)
 TYPE_ORDER = {"dns": 0, "waf": 1, "zta": 2, "other": 3}
 TYPE_LABEL = {"dns": "Email and DNS security", "waf": "Imperva Cloud WAF", "zta": "Microsoft Zero Trust", "other": "Report"}
 TIER_W = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+# Data older than this (days) is flagged as stale: DNS and WAF can be assessed daily, the Zero Trust
+# Assessment is a periodic export. Override with --max-age / max_age_days in the configuration.
+MAX_AGE_DAYS = {"dns": 2, "waf": 2, "zta": 35}
+STATUS_RANK = {"bad": 0, "warn": 1, "good": 2}
 
 
 
@@ -70,12 +74,13 @@ def first_issue(r: dict) -> str:
 def summarize_assets(kind: str, payload: dict) -> dict:
     rows = payload.get("results") or []
     tiers = payload.get("tiers") or TIER_W
-    avg = weighted_avg([r for r in rows if r.get("profile") != "nonexistent"], tiers)
+    measured = [r for r in rows if (inventory.dns_measured(r) if kind == "dns" else inventory.waf_measured(r))]
+    avg = weighted_avg(measured, tiers)
     sev = Counter(i.get("severity") for r in rows for i in r.get("issues") or [])
     noun = "domains" if kind == "dns" else "websites"
-    kpis = [[len(rows), f"{noun} assessed"],
+    kpis = [[len(rows), f"{noun} assessed"], *([[len(rows) - len(measured), "not verified (errors)", "warn"]] if len(measured) < len(rows) else []),
             [sum(r.get("overall_score", 0) >= 80 for r in rows), "well protected (80+)", "pass"],
-            [sum(r.get("overall_score", 0) < 50 for r in rows), "at critical risk (under 50)", "fail"],
+            [sum(r.get("overall_score", 0) < 50 for r in measured), "at critical risk (under 50)", "fail"],
             [sev.get("critical", 0), "critical findings", "fail" if sev.get("critical") else ""]]
     if kind == "waf":
         bypass = sum(r.get("profile") == "bypass" for r in rows)
@@ -238,47 +243,73 @@ def _asset_actions(kind: str, payload: dict, rows: List[dict]) -> List[dict]:
 
 
 def exec_dns(payload: dict) -> dict:
+    """E-mail/DNS outcomes. Only measured domains count: not checked or failed lookups are 'not verified', never 'exposed'."""
     rows = [r for r in payload.get("results") or [] if r.get("profile") != "nonexistent"]
-    n = len(rows)
     checks = payload.get("checks") or []
-    enforced = [r for r in rows if (r.get("dmarc") or {}).get("policy") in ("quarantine", "reject")
-                and int((r.get("dmarc") or {}).get("pct") or 100) == 100]
-    spoofable = [r for r in rows if (r.get("dmarc") or {}).get("policy") in (None, "", "none")]
-    crit = [r for r in rows if r.get("tier") == "critical"]
-    kpis = [_kpi("spoof", "Domains protected against spoofing", _pct(len(enforced), n), "%",
-                 f"{len(enforced)} of {n} domains enforce DMARC", 100, area="dns", hash_="#/domains?comp=dmarc_enforcement:fail")]
-    side = [["Can be impersonated by email", f"{len(spoofable)} domain{'' if len(spoofable) == 1 else 's'}", "bad" if spoofable else "good"]]
-    if crit:
-        ok = sum(r in enforced for r in crit)
+    measured = [r for r in rows if inventory.dns_measured(r)]
+    states = {id(r): inventory.dmarc_state(r) for r in rows}
+    known = [r for r in rows if states[id(r)] != "unknown"]
+    enforced = [r for r in known if states[id(r)] == "enforced"]
+    spoofable = [r for r in known if states[id(r)] == "spoofable"]
+    unverified = len(rows) - len(known)
+    crit = [r for r in known if r.get("tier") == "critical"]
+    note = f", {unverified} not verified" if unverified else ""
+    if "dmarc" not in checks:
+        spoof_kpi = _kpi("spoof", "Domains protected against spoofing", None, "%", "DMARC was not checked in this assessment", 100, area="dns")
+    else:
+        spoof_kpi = _kpi("spoof", "Domains protected against spoofing", _pct(len(enforced), len(known)), "%",
+                         f"{len(enforced)} of {len(known)} verified domains enforce DMARC{note}", 100, area="dns",
+                         hash_="#/domains?comp=dmarc_enforcement:fail")
+    kpis = [spoof_kpi]
+    side = []
+    if "dmarc" in checks:
+        side.append(["Can be impersonated by email", f"{len(spoofable)} domain{'' if len(spoofable) == 1 else 's'}", "bad" if spoofable else "good"])
+    if crit and "dmarc" in checks:
+        ok = sum(states[id(r)] == "enforced" for r in crit)
         side.append(["Critical-tier domains protected", f"{ok} of {len(crit)}", "good" if ok == len(crit) else "bad"])
     exposure = False
     if "takeover" in checks:
-        tk = [r for r in rows if (r.get("takeover") or {}).get("status") == "error"]
+        tk = [r for r in measured if (r.get("takeover") or {}).get("status") == "error"]
         exposure = bool(tk)
         side.append(["Exposed to takeover of a dependency", f"{len(tk)} domain{'' if len(tk) == 1 else 's'}", "bad" if tk else "good"])
-    mail = [r for r in rows if r.get("profile") == "mail"]
+    if "axfr" in checks:
+        ax = [r for r in measured if (r.get("axfr") or {}).get("status") == "error"]
+        exposure = exposure or bool(ax)
+        side.append(["Zone transfer open to anyone", f"{len(ax)} domain{'' if len(ax) == 1 else 's'}", "bad" if ax else "good"])
+    if "caa" in checks:
+        caa = [r for r in measured if (r.get("caa") or {}).get("status") in ("valid", "warning", "missing")]
+        ok = sum((r.get("caa") or {}).get("status") != "missing" for r in caa)
+        if caa:
+            side.append(["Certificate issuance restricted (CAA)", f"{ok} of {len(caa)}", "good" if ok == len(caa) else "warn"])
+    mail = [r for r in measured if r.get("profile") == "mail" and (r.get("dkim") or {}).get("status") not in inventory.UNKNOWN_STATUSES]
     if mail and "dkim" in checks:
         signed = sum((r.get("dkim") or {}).get("status") in ("valid", "partial") for r in mail)
         side.append(["Mail domains signing with DKIM", f"{_pct(signed, len(mail))}%", "good" if signed == len(mail) else "warn"])
-    score = (weighted_avg(rows, payload.get("tiers") or TIER_W))
-    deltas = [r["change"]["score_delta"] for r in rows if r.get("change") and r["change"].get("score_delta") is not None]
+    if unverified or len(measured) < len(rows):
+        side.append(["Not verified (control not run, DNS errors)", f"{max(unverified, len(rows) - len(measured))} domains", "warn"])
+    score = weighted_avg(measured, payload.get("tiers") or TIER_W)
+    deltas = [r["change"]["score_delta"] for r in measured if r.get("change") and r["change"].get("score_delta") is not None]
     trend = round(sum(deltas) / len(deltas), 1) if deltas else None
-    worst = _pct(len(spoofable), n)
+    worst = _pct(len(spoofable), len(known))
     return {"status": _status(score, exposure), "kpis": kpis, "side": side, "trend": trend,
-            "actions": _asset_actions("dns", payload, rows),
-            "headline": (worst, f"{len(spoofable)} of {n} domains ({worst}%) can be impersonated by email") if spoofable else None}
+            "actions": _asset_actions("dns", payload, measured),
+            "headline": (worst, f"{len(spoofable)} of {len(known)} verified domains ({worst}%) can be impersonated by email")
+            if spoofable else None}
 
 
 def exec_waf(payload: dict) -> dict:
+    """WAF outcomes. A website whose WAF rules were not checked or could not be read is 'not verified', not 'unprotected'."""
     rows = payload.get("results") or []
-    n = len(rows)
-
+    state = {id(r): inventory.waf_protected(r) for r in rows}
+    known = [r for r in rows if state[id(r)] is not None]
+    protected = [r for r in known if state[id(r)]]
+    unverified = len(rows) - len(known)
+    note = f", {unverified} not verified" if unverified else ""
+    kpis = [_kpi("waf", "Websites effectively protected by the WAF", _pct(len(protected), len(known)) if known else None, "%",
+                 f"{len(protected)} of {len(known)} verified websites active, blocking attacks, not bypassable{note}"
+                 if known else "WAF rules were not checked in this assessment", 100, area="waf", hash_="#/domains?comp=owasp_block:fail")]
     def codes(r):
         return {i.get("code") for i in r.get("issues") or []}
-    protected = [r for r in rows if r.get("profile") != "bypass" and (r.get("compliance") or {}).get("owasp_block") == "pass"
-                 and not codes(r) & {"ORIGIN_EXPOSED", "DNS_NOT_ROUTED", "WAF_POLICY_DISABLED", "ALLOW_BROAD_IP"}]
-    kpis = [_kpi("waf", "Websites effectively protected by the WAF", _pct(len(protected), n), "%",
-                 f"{len(protected)} of {n} active, blocking attacks, not bypassable", 100, area="waf", hash_="#/domains?comp=owasp_block:fail")]
     pci = [r for r in rows if (r.get("compliance") or {}).get("pci_642") in ("pass", "fail")]
     side = []
     if pci:
@@ -294,13 +325,17 @@ def exec_waf(payload: dict) -> dict:
     if tuned:
         ok = sum(not codes(r) & {"DDOS_THRESHOLD_LOW", "DDOS_THRESHOLD_HIGH", "DDOS_ABOVE_ORIGIN", "DDOS_OFF"} for r in tuned)
         side.append(["DDoS thresholds aligned with traffic", f"{ok} of {len(tuned)}", "good" if ok == len(tuned) else "warn"])
-    score = weighted_avg(rows, payload.get("tiers") or TIER_W)
-    deltas = [r["change"]["score_delta"] for r in rows if r.get("change") and r["change"].get("score_delta") is not None]
-    unprot = n - len(protected)
+    if unverified:
+        side.append(["Not verified (rules not checked, API errors)", f"{unverified} websites", "warn"])
+    measured = [r for r in rows if inventory.waf_measured(r)]
+    score = weighted_avg(measured, payload.get("tiers") or TIER_W)
+    deltas = [r["change"]["score_delta"] for r in measured if r.get("change") and r["change"].get("score_delta") is not None]
+    unprot = len(known) - len(protected)
     return {"status": _status(score, bool(bypass)), "kpis": kpis, "side": side,
             "trend": round(sum(deltas) / len(deltas), 1) if deltas else None,
-            "actions": _asset_actions("waf", payload, rows),
-            "headline": (_pct(unprot, n), f"{unprot} of {n} websites ({_pct(unprot, n)}%) are not effectively protected by the WAF") if unprot else None}
+            "actions": _asset_actions("waf", payload, measured),
+            "headline": (_pct(unprot, len(known)), f"{unprot} of {len(known)} verified websites ({_pct(unprot, len(known))}%) are not "
+                         "effectively protected by the WAF") if unprot else None}
 
 
 def exec_zta(payload: dict) -> dict:
@@ -489,8 +524,10 @@ def split_history(reports: List[dict]) -> Tuple[List[dict], dict]:
     return current, {"series": list(series.values()), "runs": sorted(runs, key=lambda x: x["date"])}
 
 
-def build_hub(reports: List[dict], out: str, title: str, history: Optional[dict] = None) -> int:
+def build_hub(reports: List[dict], out: str, title: str, history: Optional[dict] = None,
+              max_age: Optional[Dict[str, float]] = None) -> int:
     meta = {"version": __version__, "title": title, "generated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+            "max_age_days": {**MAX_AGE_DAYS, **(max_age or {})},
             "portfolio": portfolio(reports), "history": history or {"series": [], "runs": []},
             "inventory": inventory.build(reports)}
     index = [{k: v for k, v in r.items() if k not in ("html", "payload")} for r in reports]
@@ -498,8 +535,7 @@ def build_hub(reports: List[dict], out: str, title: str, history: Optional[dict]
     page = (HUB_TEMPLATE.replace("__TITLE__", html.escape(title or "GuardHub")).replace("__CSS__", HUB_CSS).replace("__JS__", HUB_JS)
             .replace("__DATA__", _json_for_html({"meta": meta, "reports": index}))
             .replace("__REPORTS__", blocks))
-    with open(out, "w", encoding="utf-8") as f:
-        f.write(page)
+    atomic_write(out, page)
     return len(page.encode("utf-8"))
 
 
@@ -509,6 +545,8 @@ def build_parser() -> Parser:
     p.add_argument("-o", "--output", default="security_hub.html", help="Output file (default: security_hub.html)")
     p.add_argument("--title", default="", help="Optional portal title, e.g. organization and period")
     p.add_argument("--all", action="store_true", help="In folders, also embed HTML files that are not Guard reports")
+    p.add_argument("--max-age", default="", metavar="AREA=DAYS,...",
+                   help="Flag data older than this as stale (default: dns=2,waf=2,zta=35)")
     p.add_argument("--summary-json", metavar="FILE", help="Also write a machine-readable posture summary (JSON)")
     p.add_argument("--version", action="version", version=f"GuardHub {__version__}")
     return p
@@ -525,13 +563,51 @@ def collect(inputs: List[str], include_all: bool = False, exclude: Optional[List
     return reports, history
 
 
-def posture(reports: List[dict], history: Optional[dict] = None) -> dict:
+def parse_max_age(text: str) -> Dict[str, float]:
+    """'dns=2,waf=2,zta=35' -> {"dns": 2.0, ...} (unknown areas rejected)."""
+    out: Dict[str, float] = {}
+    for part in filter(None, (p.strip() for p in (text or "").split(","))):
+        k, _, v = part.partition("=")
+        if k.strip() not in MAX_AGE_DAYS or not v:
+            raise ValueError(f"invalid max age '{part}' (expected e.g. dns=2,waf=2,zta=35)")
+        out[k.strip()] = float(v)
+    return out
+
+
+def freshness(r: dict, now: Optional[datetime] = None, limits: Optional[Dict[str, float]] = None) -> dict:
+    """Age of the data of a report and whether it exceeds the limit of its area."""
+    now = now or datetime.now(timezone.utc)
+    limit = {**MAX_AGE_DAYS, **(limits or {})}.get(r.get("type"))
+    when = parse_date(r.get("date", ""))
+    age = round((now - when).total_seconds() / 86400, 1) if when else None
+    return {"age_days": age, "max_age_days": limit, "stale": bool(limit is not None and age is not None and age > limit)}
+
+
+def overall_status(areas: List[dict]) -> dict:
+    """Overall posture without averaging scores that are not comparable across tools.
+
+    status: the worst status among the areas that could be assessed (bad > warn > good);
+    'unknown' when none could. 'complete' is false when an area is not verified or its data is stale.
+    """
+    known = [a for a in areas if a.get("status") in STATUS_RANK]
+    status = min((a["status"] for a in known), key=STATUS_RANK.get) if known else "unknown"
+    counts = {k: sum(a.get("status") == k for a in areas) for k in ("bad", "warn", "good")}
+    counts["unknown"] = len(areas) - sum(counts.values())
+    stale = [a["label"] for a in areas if a.get("stale")]
+    unverified = [a["label"] for a in areas if a.get("status") not in STATUS_RANK]
+    return {"status": status, "areas": counts, "stale": stale, "not_verified": unverified,
+            "complete": not stale and not unverified}
+
+
+def posture(reports: List[dict], history: Optional[dict] = None, max_age: Optional[Dict[str, float]] = None,
+            now: Optional[datetime] = None) -> dict:
     """Machine-readable posture summary (for monitoring, SIEM ingestion or CI gates)."""
     areas = []
     for r in reports:
         ex = r.get("exec") or {}
         areas.append({
             "area": r["type"], "label": r["label"], "title": r["title"], "file": r["file"], "date": r["date"],
+            **freshness(r, now, max_age),
             "subject": r.get("subject", ""), "score": r.get("score"), "grade": r.get("grade"),
             "status": ex.get("status"), "headline": (ex.get("headline") or [None, None])[1],
             "kpis": [{k: v for k, v in kpi.items() if k in ("key", "label", "value", "unit", "detail", "target", "trend")}
@@ -539,16 +615,14 @@ def posture(reports: List[dict], history: Optional[dict] = None) -> dict:
             "actions": ex.get("actions", [])[:5],
         })
     pf = portfolio(reports)
-    scores = [a["score"] for a in areas if a["score"] is not None]
-    overall = round(sum(scores) / len(scores)) if scores else None
-    inv = inventory.build(reports)
+    inv = inventory.build(reports, now)
     assets = [{"asset": a["key"], "status": a["status"], "tier": a["tier"], "score": a["score"], "owners": a["owners"],
                "domains": [d["domain"] for d in a["dns"]], "websites": [w["domain"] for w in a["web"]],
                "next_expiry": a["next_expiry"] and {k: a["next_expiry"][k] for k in ("kind", "name", "date", "days")},
                "signals": [{k: s[k] for k in ("severity", "code", "text")} for s in a["signals"]]}
               for a in inv["assets"]]
-    return {"tool": f"GuardHub {__version__}", "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "overall_score": overall, "overall_grade": grade(overall), "summary": pf["sentence"], "counts": pf["counts"],
+    return {"schema": 2, "tool": f"GuardHub {__version__}", "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "overall": overall_status(areas), "summary": pf["sentence"], "counts": pf["counts"],
             "areas": areas, "actions": pf["actions"], "assets": {"summary": inv["summary"], "items": assets},
             "runs": (history or {}).get("runs", [])}
 
@@ -563,7 +637,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not reports:
         print("Error: no reports found", file=sys.stderr)
         return EXIT_USAGE
-    size = build_hub(reports, args.output, args.title, history)
+    try:
+        max_age = parse_max_age(args.max_age)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return EXIT_USAGE
+    size = build_hub(reports, args.output, args.title, history, max_age)
     print(f"Portal generated: {args.output} ({size / 1048576:.1f} MB)")
     for r in reports:
         hist = f", {r['history']} runs in history" if r.get("history", 1) > 1 else ""
@@ -571,8 +650,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if size > 60 * 1048576:
         print("Note: the portal is large; very big portfolios load faster as separate reports.", file=sys.stderr)
     if args.summary_json:
-        with open(args.summary_json, "w", encoding="utf-8") as f:
-            json.dump(posture(reports, history), f, indent=2, ensure_ascii=False)
+        atomic_write(args.summary_json, json.dumps(posture(reports, history, max_age), indent=2, ensure_ascii=False))
         print(f"Posture summary: {args.summary_json}")
     return EXIT_OK
 

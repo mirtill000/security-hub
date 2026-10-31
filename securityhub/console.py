@@ -13,7 +13,16 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional, TextIO
 
-STATUS_TEXT = {"good": "On track", "warn": "Attention", "bad": "At risk", "unknown": "n/a", None: "n/a"}
+STATUS_TEXT = {"good": "On track", "warn": "Attention", "bad": "At risk", "unknown": "Not verified", None: "Not verified"}
+
+
+def age_txt(a: dict, st: "Style") -> str:
+    """'2026-10-01, 30 days old' - yellow and marked when beyond the area's limit."""
+    age = a.get("age_days")
+    text = a.get("date", "")[:10] + ("" if age is None else f", {age:.0f} day{'' if round(age) == 1 else 's'} old" if age >= 1 else ", today")
+    if a.get("stale"):
+        return st(f"{text} {st.warn} stale (limit {a.get('max_age_days'):g} days)", "yellow")
+    return st(text, "dim")
 STATUS_TONE = {"good": "green", "warn": "yellow", "bad": "red"}
 GRADE_TONE = {"A": "green", "B": "green", "C": "yellow", "D": "red", "F": "red"}
 SEV_TONE = {"critical": "red", "warning": "yellow", "info": "dim"}
@@ -137,10 +146,18 @@ class Progress:
 def print_posture(summary: dict, file: TextIO = None) -> None:
     out = file or sys.stdout
     st = Style(out)
-    overall, g = summary.get("overall_score"), summary.get("overall_grade", "-")
+    ov = summary.get("overall") or {}
+    s0 = ov.get("status", "unknown")
+    counts = ov.get("areas") or {}
+    parts = [f"{counts[k]} {w}" for k, w in (("bad", "at risk"), ("warn", "need attention"), ("good", "on track"),
+                                              ("unknown", "not verified")) if counts.get(k)]
     print("", file=out)
-    print(st("SECURITY POSTURE", "bold") + "  " + st(f" {g} ", "bold", GRADE_TONE.get(g, ""))
-          + (st(f"  {overall}/100", "bold") if overall is not None else ""), file=out)
+    print(st("SECURITY POSTURE", "bold") + "  " + st(f" {STATUS_TEXT.get(s0, s0).upper()} ", "bold", STATUS_TONE.get(s0, "dim"))
+          + (st("  " + " \u00b7 ".join(parts) if st.dot != "-" else "  " + ", ".join(parts), "dim") if parts else ""), file=out)
+    if ov and not ov.get("complete", True):
+        gaps = ([f"stale: {', '.join(ov['stale'])}"] if ov.get("stale") else []) + \
+               ([f"not verified: {', '.join(ov['not_verified'])}"] if ov.get("not_verified") else [])
+        print(st(f"{st.warn} Incomplete picture - {'; '.join(gaps)}", "yellow"), file=out)
     print(st(st.rule * 72, "dim"), file=out)
     if summary.get("summary"):
         print(summary["summary"], file=out)
@@ -150,7 +167,7 @@ def print_posture(summary: dict, file: TextIO = None) -> None:
         score = "  -" if a.get("score") is None else f"{a['score']:>3}"
         gr = a.get("grade") or "-"
         print(f"  {a['label']:<26} {st(f'{gr:>2}', 'bold', GRADE_TONE.get(gr, ''))} {score}  "
-              f"{st(f'{STATUS_TEXT.get(s, s):<10}', STATUS_TONE.get(s, 'dim'))} {st(a.get('date', '')[:10], 'dim')}", file=out)
+              f"{st(f'{STATUS_TEXT.get(s, s):<12}', STATUS_TONE.get(s, 'dim'))} {age_txt(a, st)}", file=out)
         if a.get("headline"):
             print(f"  {'':<26} {st(a['headline'], 'dim')}", file=out)
         for k in a.get("kpis", []):

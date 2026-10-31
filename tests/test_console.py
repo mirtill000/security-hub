@@ -13,8 +13,11 @@ class Tty(io.StringIO):
         return True
 
 
-SUMMARY = {"overall_score": 52, "overall_grade": "D", "summary": "2 need attention.",
-           "areas": [{"label": "Imperva Cloud WAF", "grade": "D", "score": 50, "status": "warn", "date": "2026-10-31T08:00:00Z",
+SUMMARY = {"overall": {"status": "warn", "areas": {"bad": 0, "warn": 1, "good": 0, "unknown": 1}, "stale": ["Microsoft Zero Trust"],
+                       "not_verified": [], "complete": False}, "summary": "2 need attention.",
+           "areas": [{"label": "Microsoft Zero Trust", "grade": "D", "score": 54, "status": "warn", "date": "2026-09-01T08:00:00Z",
+                      "age_days": 60.0, "max_age_days": 35, "stale": True, "kpis": []},
+                     {"label": "Imperva Cloud WAF", "grade": "D", "score": 50, "status": "warn", "date": "2026-10-31T08:00:00Z", "age_days": 0.2,
                       "headline": "2 of 3 websites are not protected", "kpis": [{"label": "Protected", "value": 33, "unit": "%"}]}],
            "assets": {"summary": {"total": 4, "at_risk": 3, "coverage_gaps": 1},
                       "items": [{"asset": "fabrikam.example", "status": "bad", "signals": [{"text": "web and mail exposed"}]}]},
@@ -28,7 +31,8 @@ class ConsoleTest(unittest.TestCase):
             print_posture(SUMMARY, out)
         text = out.getvalue()
         self.assertNotIn("\033[", text)
-        for s in ("SECURITY POSTURE", "52/100", "Attention", "Protected: 33%", "fabrikam.example", "3 at risk", "No WAF policy"):
+        for s in ("SECURITY POSTURE", "ATTENTION", "1 need attention", "1 not verified", "Incomplete picture - stale: Microsoft Zero Trust",
+                  "60 days old", "stale (limit 35 days)", "today", "Protected: 33%", "fabrikam.example", "3 at risk", "No WAF policy"):
             self.assertIn(s, text)
 
     def test_colors_on_a_terminal_and_no_color(self):

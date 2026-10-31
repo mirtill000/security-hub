@@ -9,7 +9,8 @@
     securityhub portal   <reports...> [options]   combine reports into one portal (GuardHub)
 
 `securityhub <module> --help` shows the options of each module.
-Exit codes (every command): 0 ok, 1 usage / input / API error, 2 score below --fail-under, 130 interrupted.
+Exit codes (every command): 0 ok, 1 usage / input / API error, 2 score below --fail-under, 130 interrupted;
+'status --fail-stale': 3 when the data of an area is older than its limit.
 """
 
 from __future__ import annotations
@@ -75,9 +76,11 @@ def _status_cmd(argv: List[str]) -> int:
     p.add_argument("inputs", nargs="*", default=["reports"], help="Output folder of 'run', report folders or HTML reports")
     p.add_argument("--json", action="store_true", help="Print the posture as JSON")
     p.add_argument("--json-out", metavar="FILE", help="Also write the posture JSON to this file")
+    p.add_argument("--max-age", default="", metavar="AREA=DAYS,...", help="Stale data limits (default: dns=2,waf=2,zta=35)")
+    p.add_argument("--fail-stale", action="store_true", help="Exit with code 3 if the data of an area is stale (for monitoring)")
     a = p.parse_args(argv)
     try:
-        return orchestrator.status(a.inputs, a.json_out, a.json)
+        return orchestrator.status(a.inputs, a.json_out, a.json, a.max_age, a.fail_stale)
     except FileNotFoundError as e:
         print(f"Error: not found: {e}", file=sys.stderr)
         return EXIT_USAGE

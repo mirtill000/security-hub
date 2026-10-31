@@ -146,6 +146,23 @@ def suggest_remediation(r: DomainResult, checks: Set[str]) -> List[dict]:
             f"v=TLSRPTv1; rua=mailto:tls-reports@{org_domain(domain)}")
     if "dnssec" in checks and r.dnssec.status == "missing":
         rec("Enable DNSSEC", "", "", "", "Sign the zone at your DNS provider and publish the DS record at the registrar")
+    if "caa" in checks and r.caa.status == "missing":
+        iodef = f'0 iodef "mailto:security@{org_domain(domain)}"'
+        if r.profile == "non-mail" and not r.mx.records:
+            rec("Forbid certificate issuance", domain, "CAA", f'0 issue ";"\n{iodef}',
+                "For domains that serve no website or mail: no CA may issue certificates")
+        else:
+            rec("Restrict certificate issuance to your CAs", domain, "CAA",
+                f'0 issue "<your-ca.example>"\n0 issuewild ";"\n{iodef}',
+                "Replace <your-ca.example> with each CA you use (e.g. digicert.com, letsencrypt.org, pki.goog); "
+                "add an issuewild line only if you use wildcard certificates")
+    elif "caa" in checks and r.caa.status == "valid" and not r.caa.iodef and r.caa.issuers != [";"]:
+        rec("Get notified of refused certificate requests", r.caa.inherited_from or domain, "CAA",
+            f'0 iodef "mailto:security@{org_domain(domain)}"')
+    if "axfr" in checks and r.axfr.status == "error":
+        servers = ", ".join(s["ns"] for s in r.axfr.servers if s["result"] == "open")
+        rec("Refuse zone transfers from the Internet", "", "", "",
+            f"On {servers}: allow AXFR/IXFR only to your secondary servers (allow-transfer ACL or TSIG keys)")
     if "takeover" in checks:
         for e in r.takeover.dependencies:
             if e["state"] in ("unregistered", "expired"):

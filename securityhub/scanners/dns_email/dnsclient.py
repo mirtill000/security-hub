@@ -181,6 +181,24 @@ class DNSClient:
         ans = self.query(rev, "PTR")
         return ans.records[0] if ans.status == "ok" and ans.records else None
 
+    def axfr(self, server: str, zone: str) -> Tuple[str, int]:
+        """Ask `server` (an IP address) for a full zone transfer of `zone`.
+
+        Returns ("open", records in the first message), ("refused", 0) or ("unreachable", 0). Only the first
+        message is read: enough to prove the zone is exposed, without downloading or storing it.
+        """
+        if self._rate:
+            self._rate.wait()
+        try:
+            for msg in dns.query.xfr(server, zone, timeout=self.timeout, lifetime=self.timeout * 2):
+                n = sum(len(rrset) for rrset in msg.answer)
+                return ("open", n) if n else ("refused", 0)
+            return "refused", 0
+        except (OSError, EOFError, dns.exception.Timeout):
+            return "unreachable", 0
+        except Exception:  # TransferError (REFUSED / NOTAUTH), FormError, malformed answers
+            return "refused", 0
+
     def query_server(self, name: str, rdtype: str, server: str, recursion: bool = True) -> Tuple[str, List[str]]:
         """Uncached query sent to one server (consistency checks)."""
         q = dns.message.make_query(name, rdtype)

@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 from .checks_auth import AuthChecks, _SPFEval
+from .checks_dns import DNSHygieneChecks
 from .checks_exposure import ExposureChecks
 from .checks_transport import TransportChecks
 from .constants import (CHECKS, CHECK_ATTRS, CHECK_DEPENDENCIES, DEFAULT_CHECKS, DEFAULT_DKIM_SELECTORS,
@@ -22,7 +23,7 @@ from .remediation import suggest_remediation
 from .scoring import Scoring
 
 
-class EmailSecurityAnalyzer(AuthChecks, TransportChecks, ExposureChecks, Scoring):
+class EmailSecurityAnalyzer(AuthChecks, TransportChecks, DNSHygieneChecks, ExposureChecks, Scoring):
     """Analyzes email security configurations for domains via live DNS queries."""
 
     COMMON_DKIM_SELECTORS = DEFAULT_DKIM_SELECTORS
@@ -164,7 +165,7 @@ class EmailSecurityAnalyzer(AuthChecks, TransportChecks, ExposureChecks, Scoring
             self._mark_skipped(result)
             for check, attr in CHECK_ATTRS.items():
                 if check in sel:
-                    getattr(result, attr).status = "unknown" if check in ("dnssec", "takeover", "consistency", "lookalikes") else "dns_error"
+                    getattr(result, attr).status = "unknown" if check in ("dnssec", "takeover", "axfr", "consistency", "lookalikes") else "dns_error"
             result.issues.append(make_issue(
                 "DNS_ERROR", f"name servers unreachable ({soa.error}) - remaining checks skipped"))
             return
@@ -202,6 +203,10 @@ class EmailSecurityAnalyzer(AuthChecks, TransportChecks, ExposureChecks, Scoring
             submit("tls-rpt", self._analyze_tls_rpt, domain, mail_enabled)
         if "consistency" in run:
             submit("consistency", self._analyze_consistency, domain)
+        if "caa" in run:
+            submit("caa", self._analyze_caa, domain)
+        if "axfr" in run:
+            submit("axfr", self._analyze_axfr, domain)
         if "dkim" in run:
             result.dkim = timed("dkim", self._analyze_dkim, domain, mail_enabled)
         for check, fut in pending.items():

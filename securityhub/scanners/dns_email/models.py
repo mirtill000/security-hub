@@ -148,6 +148,24 @@ class TakeoverResult:
 
 
 @dataclass
+class CAAResult:
+    status: str = "missing"  # valid, warning, missing, dns_error, skipped
+    records: List[dict] = field(default_factory=list)   # flags, tag, value
+    issuers: List[str] = field(default_factory=list)    # CAs allowed to issue (";" = none)
+    wildcard_issuers: Optional[List[str]] = None        # issuewild, when present
+    iodef: List[str] = field(default_factory=list)
+    inherited_from: Optional[str] = None                # parent name the CAA set was found at (RFC 8659 climbing)
+    issues: List[Issue] = field(default_factory=list)
+
+
+@dataclass
+class AXFRResult:
+    status: str = "unknown"  # valid (all refuse), error (a server allows it), unknown, skipped
+    servers: List[dict] = field(default_factory=list)   # ns, ip, result (refused, open, unreachable), records
+    issues: List[Issue] = field(default_factory=list)
+
+
+@dataclass
 class ConsistencyResult:
     status: str = "missing"  # valid, warning, unknown, skipped
     sources: List[str] = field(default_factory=list)
@@ -200,7 +218,9 @@ class DomainResult:
     tls_rpt: TLSRPTResult = field(default_factory=TLSRPTResult)
     bimi: BIMIResult = field(default_factory=BIMIResult)
     dnssec: DNSSECResult = field(default_factory=DNSSECResult)
+    caa: CAAResult = field(default_factory=CAAResult)
     takeover: TakeoverResult = field(default_factory=TakeoverResult)
+    axfr: AXFRResult = field(default_factory=AXFRResult)
     consistency: ConsistencyResult = field(default_factory=ConsistencyResult)
     lookalikes: LookalikeResult = field(default_factory=LookalikeResult)
     dmarc_reports: DMARCReportResult = field(default_factory=DMARCReportResult)

@@ -28,19 +28,23 @@ def fake_dns(zones: dict = None):
             target = node["CNAME"][0]
             sub = resolve(self, target, rdtype)
             return Answer(sub.status, sub.records, False, target, sub.error)
-        if rdtype not in node:
+        if rdtype not in node or rdtype == "AXFR":
             return Answer("nodata")
         recs = node[rdtype]
         if rdtype == "MX":
             recs = [(int(p), h) for p, h in recs]
         return Answer("ok", list(recs), False, None)
 
-    original = dns_email.DNSClient._resolve
-    dns_email.DNSClient._resolve = resolve
+    def axfr(self, server, zone):
+        node = zones.get(zone.lower().rstrip("."), {})
+        return ("open", 42) if node.get("AXFR") == "open" else ("refused", 0)
+
+    original = dns_email.DNSClient._resolve, dns_email.DNSClient.axfr
+    dns_email.DNSClient._resolve, dns_email.DNSClient.axfr = resolve, axfr
     try:
         yield
     finally:
-        dns_email.DNSClient._resolve = original
+        dns_email.DNSClient._resolve, dns_email.DNSClient.axfr = original
 
 
 # Options that keep the DNS module fully offline (with fake_dns active).

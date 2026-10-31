@@ -60,7 +60,12 @@ from .constants import (
     USER_AGENT,
     parse_checks,
 )
+from .checks_dns import (
+    DNSHygieneChecks,
+)
 from .models import (
+    AXFRResult,
+    CAAResult,
     BIMIResult,
     ConsistencyResult,
     DKIMResult,
@@ -170,6 +175,9 @@ from .cli import (
 )
 
 __all__ = [
+    'AXFRResult',
+    'CAAResult',
+    'DNSHygieneChecks',
     'ASCII_HOMOGLYPHS',
     'AuthChecks',
     'BIMIResult',

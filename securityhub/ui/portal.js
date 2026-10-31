@@ -127,7 +127,10 @@ function trends() {
 const INV = M.inventory || {assets: [], summary: {}}, AS = INV.assets || [], AQ = () => (S.aq || '').trim().toLowerCase();
 const hasAssets = () => AS.length > 0;
 const A_FILTERS = [['all', 'All', () => true], ['risk', 'At risk', a => a.status === 'bad'], ['attention', 'Needs attention', a => a.status === 'warn'],
-  ['gaps', 'Coverage gaps', a => a.coverage_gap], ['expiring', 'Expiring', a => a.expiries.some(e => e.days !== null && e.days <= 30)]];
+  ['gaps', 'Coverage gaps', a => a.coverage_gap], ['expiring', 'Expiring', a => a.expiries.some(e => e.days !== null && e.days <= 30)],
+  ['incomplete', 'Not verified', a => a.incomplete]];
+const dmarcTxt = d => `<span class="${d.dmarc_state === 'enforced' ? 'tx-good' : d.dmarc_state === 'spoofable' ? 'tx-bad' : 'faint'}">${esc(d.dmarc)}</span>`;
+const protPill = p => p === null || p === undefined ? '<span class="pill s-na">not verified</span>' : `<span class="pill ${p ? 's-pass' : 's-fail'}">${p ? 'yes' : 'no'}</span>`;
 const CTL = {valid: 's-pass', partial: 's-warn', warning: 's-warn', missing: 's-none', misconfigured: 's-fail', error: 's-fail', invalid: 's-fail', bogus: 's-fail'};
 const ctlPill = v => v ? `<span class="pill ${CTL[v] || 's-na'}">${esc(v)}</span>` : '<span class="faint">-</span>';
 const scoreTxt = n => n === null || n === undefined ? '<span class="faint">-</span>' : `<span class="score ${scoreCls(n)}">${esc(n)}</span>`;
@@ -143,24 +146,44 @@ function expiryTxt(e) {
 }
 const sigCount = a => { const c = a.signals.filter(x => x.severity === 'critical').length, w = a.signals.filter(x => x.severity === 'warning').length;
   return (c ? `<span class="pill s-fail">${c} critical</span> ` : '') + (w ? `<span class="pill s-warn">${w} warning</span>` : '') || '<span class="faint">none</span>'; };
+const A_PAGE = 50, TIER_RANK = {critical: 0, high: 1, medium: 2, low: 3}, ST_RANK = {bad: 0, warn: 1, unknown: 2, good: 3};
+const num = (v, none) => v === null || v === undefined ? none : v;
+const A_SORT = {
+  risk: a => a._rank, asset: a => a.key, tier: a => TIER_RANK[a.tier] ?? 9, status: a => ST_RANK[a.status] ?? 9,
+  dns: a => num(a.dns_score, 1e3), web: a => num(a.web_score, 1e3), expiry: a => a.next_expiry ? num(a.next_expiry.days, 1e6) : 1e6,
+  signals: a => -(a.signals.filter(x => x.severity === 'critical').length * 1000 + a.signals.filter(x => x.severity === 'warning').length)};
+AS.forEach((a, i) => { a._rank = i; });
+function sortedAssets(rows) {
+  const k = (S.asort || {}).k || 'risk', d = (S.asort || {}).d || 1, f = A_SORT[k] || A_SORT.risk;
+  return rows.slice().sort((x, y) => { const a = f(x), b = f(y); return (a < b ? -1 : a > b ? 1 : x._rank - y._rank) * d; });
+}
+function ath(k, label, sticky) {
+  const cur = (S.asort || {}).k === k ? ((S.asort.d > 0) ? 'ascending' : 'descending') : 'none';
+  return `<th${sticky ? ' class="sticky"' : ''} aria-sort="${cur}"><button class="sort" data-asort="${k}">${esc(label)}</button></th>`;
+}
 function assetMatches(a) {
   const q = AQ(); if (!q) return true;
   return [a.key, ...a.owners, ...a.bus, ...a.dns.map(d => d.domain), ...a.web.map(w => w.domain)].some(x => String(x).toLowerCase().includes(q));
 }
 function assetList() {
-  const f = (A_FILTERS.find(x => x[0] === S.af) || A_FILTERS[0]), rows = AS.filter(f[2]).filter(assetMatches), sm = INV.summary || {};
+  const f = (A_FILTERS.find(x => x[0] === S.af) || A_FILTERS[0]), all = sortedAssets(AS.filter(f[2]).filter(assetMatches)), sm = INV.summary || {};
+  const pages = Math.max(1, Math.ceil(all.length / A_PAGE)); S.apage = Math.min(Math.max(1, S.apage || 1), pages);
+  const rows = all.slice((S.apage - 1) * A_PAGE, S.apage * A_PAGE);
+  const pager = pages > 1 ? `<nav class="pager" aria-label="Pagination"><span>Rows ${(S.apage - 1) * A_PAGE + 1} to ${Math.min(S.apage * A_PAGE, all.length)} of ${all.length}</span>
+    <div class="pages"><button class="btn small" data-apage="${S.apage - 1}"${S.apage <= 1 ? ' disabled' : ''}>Previous</button><span class="faint">Page ${S.apage} of ${pages}</span>
+    <button class="btn small" data-apage="${S.apage + 1}"${S.apage >= pages ? ' disabled' : ''}>Next</button></div></nav>` : '';
   const presets = A_FILTERS.map(([k, l, fn]) => `<button class="preset" data-af="${k}" aria-pressed="${S.af === k}">${esc(l)}<span class="n">${AS.filter(fn).length}</span></button>`).join('');
-  const body = rows.map(a => { const root = a.dns.find(d => d.domain === a.key) || a.dns[0], byp = a.web.filter(w => w.profile === 'bypass').length, unp = a.web.filter(w => !w.protected).length;
+  const body = rows.map(a => { const root = a.dns.find(d => d.domain === a.key) || a.dns[0], byp = a.web.filter(w => w.profile === 'bypass').length, unp = a.web.filter(w => w.protected === false).length;
     return `<tr data-asset="${esc(a.key)}"><td class="sticky"><button class="dom" data-asset="${esc(a.key)}">${esc(a.key)}</button><div class="dom-sub">${esc([...a.owners, ...a.bus].join(', ') || ' ')}</div></td>
       <td>${tierTag(a.tier)}</td><td>${stPill(a.status)}</td>
-      <td>${root ? `${scoreTxt(a.dns_score)}${SEP}<span class="faint">DMARC</span> <span class="${root.enforced ? 'tx-good' : 'tx-bad'}">${esc(root.dmarc)}</span>${a.dns.length > 1 ? `${SEP}<span class="faint">${plural(a.dns.length, 'domain')}</span>` : ''}` : '<span class="faint">not assessed</span>'}</td>
+      <td>${root ? `${scoreTxt(a.dns_score)}${SEP}<span class="faint">DMARC</span> ${dmarcTxt(root)}${a.dns.length > 1 ? `${SEP}<span class="faint">${plural(a.dns.length, 'domain')}</span>` : ''}` : '<span class="faint">not assessed</span>'}</td>
       <td>${a.web.length ? `${scoreTxt(a.web_score)}${SEP}<span class="faint">${plural(a.web.length, 'site')}</span>${byp ? `${SEP}<span class="tx-bad">${byp} in bypass</span>` : unp ? `${SEP}<span class="tx-warn">${unp} not blocking</span>` : ''}` : '<span class="faint">none</span>'}</td>
       <td class="nowrap">${expiryTxt(a.next_expiry)}</td>
       <td><div class="asset-sig">${sigCount(a)}${a.signals[0] ? `<span class="asset-sig-t">${esc(a.signals[0].text)}</span>` : ''}</div></td></tr>`; }).join('');
   return `<div class="section-title"><h2>Assets</h2><p>${plural(sm.total || 0, 'organization domain')}: ${plural(sm.domains || 0, 'mail domain')} and ${plural(sm.websites || 0, 'website')} joined across reports, with the problems that only show when areas are seen together</p></div>
     <div class="presets" role="group" aria-label="Filter assets">${presets}</div>
-    <div class="toolbar"><div class="search-box">${icon('search')}<input id="aq" type="search" placeholder="Filter by domain, website, owner, business unit" value="${esc(S.aq || '')}" aria-label="Filter assets"></div><span class="spacer"></span><span class="faint">${plural(rows.length, 'asset')}</span></div>
-    ${rows.length ? `<div class="grid-wrap asset-grid"><table class="grid"><thead><tr><th class="sticky">Asset</th><th>Tier</th><th>Status</th><th>E-mail and DNS</th><th>Websites (WAF)</th><th>Next expiry</th><th>Signals</th></tr></thead><tbody>${body}</tbody></table></div>`
+    <div class="toolbar"><div class="search-box">${icon('search')}<input id="aq" type="search" placeholder="Filter by domain, website, owner, business unit" value="${esc(S.aq || '')}" aria-label="Filter assets"></div><span class="spacer"></span><span class="faint" id="a-count">${plural(all.length, 'asset')}</span></div>
+    ${rows.length ? `<div class="grid-wrap asset-grid"><table class="grid"><thead><tr>${ath('asset', 'Asset', true)}${ath('tier', 'Tier')}${ath('status', 'Status')}${ath('dns', 'E-mail and DNS')}${ath('web', 'Websites (WAF)')}${ath('expiry', 'Next expiry')}${ath('signals', 'Signals')}</tr></thead><tbody>${body}</tbody></table></div>${pager}`
       : '<div class="card empty"><b>No assets match</b>Change the filter or the search text.</div>'}
     <p class="faint exec-note">Assets are grouped by the domains assessed for e-mail security; websites join the domain they belong to. Scores are the lowest of each area.</p>`;
 }
@@ -168,17 +191,17 @@ const openBtn = (rid, h, label) => rid ? `<button class="btn" data-go="${esc(rid
 function assetDetail(a) {
   if (!a) return '<div class="card empty"><b>Asset not found</b>It is not in the latest reports.</div>';
   const sig = a.signals.length ? `<section class="card exec-actions asset-signals"><header><h2>Signals</h2><p>Problems of this asset across areas, most severe first</p></header><div class="body"><ul>
-    ${a.signals.map(x => `<li><button class="exec-act"${x.report ? ` data-go="${esc(x.report)}" data-h="${esc(x.hash)}"` : ''}><span class="sev-bar sev-${esc(x.severity === 'critical' ? 'critical' : 'warning')}"></span>
-      <span class="exec-act-main"><b>${esc(x.text)}</b><span class="exec-act-rec">${esc(SIG_LABEL[x.code] || '')}</span></span><span class="exec-act-meta"><span class="pill ${x.severity === 'critical' ? 's-fail' : 's-warn'}">${esc(x.severity)}</span></span></button></li>`).join('')}</ul></div></section>`
+    ${a.signals.map(x => `<li><button class="exec-act"${x.report ? ` data-go="${esc(x.report)}" data-h="${esc(x.hash)}"` : ''}><span class="sev-bar sev-${esc(x.severity)}"></span>
+      <span class="exec-act-main"><b>${esc(x.text)}</b><span class="exec-act-rec">${esc(SIG_LABEL[x.code] || '')}</span></span><span class="exec-act-meta"><span class="pill ${({critical: 's-fail', warning: 's-warn'})[x.severity] || 's-null'}">${esc(x.severity)}</span></span></button></li>`).join('')}</ul></div></section>`
     : '<section class="card"><div class="body muted">No cross-area signals for this asset.</div></section>';
-  const dns = a.dns.length ? `<div class="grid-wrap asset-sub"><table class="grid"><thead><tr><th>Domain</th><th>Score</th><th>DMARC</th><th>SPF</th><th>MTA-STS</th><th>DNSSEC</th><th>Main finding</th><th></th></tr></thead><tbody>
+  const dns = a.dns.length ? `<div class="grid-wrap asset-sub"><table class="grid"><thead><tr><th>Domain</th><th>Score</th><th>DMARC</th><th>SPF</th><th>CAA</th><th>DNSSEC</th><th>Main finding</th><th></th></tr></thead><tbody>
     ${a.dns.map(d => `<tr data-go="${esc(d.report)}" data-h="${esc(d.hash)}"><td><b>${esc(d.domain)}</b><div class="dom-sub">${esc(d.profile || '')}</div></td><td>${scoreTxt(d.score)}</td>
-      <td><span class="pill ${d.enforced ? 's-pass' : 's-fail'}">${esc(d.dmarc)}</span></td><td>${ctlPill(d.spf)}</td><td>${ctlPill(d.mta_sts)}</td><td>${ctlPill(d.dnssec)}</td>
+      <td><span class="pill ${d.dmarc_state === 'enforced' ? 's-pass' : d.dmarc_state === 'spoofable' ? 's-fail' : 's-na'}">${esc(d.dmarc)}</span></td><td>${ctlPill(d.spf)}</td><td>${ctlPill(d.caa)}</td><td>${ctlPill(d.dnssec)}</td>
       <td class="sub">${esc(d.main)}</td><td>${openBtn(d.report, d.hash)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Not in the e-mail and DNS assessment.</p>';
   const web = a.web.length ? `<div class="grid-wrap asset-sub"><table class="grid"><thead><tr><th>Website</th><th>Score</th><th>Mode</th><th>Blocks attacks</th><th>Certificate</th><th>Main finding</th><th></th></tr></thead><tbody>
     ${a.web.map(w => `<tr data-go="${esc(w.report)}" data-h="${esc(w.hash)}"><td><b>${esc(w.domain)}</b><div class="dom-sub">${esc(w.account || '')}</div></td><td>${scoreTxt(w.score)}</td>
       <td><span class="pill ${w.profile === 'bypass' ? 's-fail' : w.profile === 'protected' ? 's-pass' : 's-warn'}">${esc(w.profile)}</span></td>
-      <td><span class="pill ${w.protected ? 's-pass' : 's-fail'}">${w.protected ? 'yes' : 'no'}</span></td>
+      <td>${protPill(w.protected)}</td>
       <td class="nowrap">${w.cert_expires ? esc(w.cert_expires) + ' ' : ''}${expiryTxt({kind: 'certificate', days: w.cert_days !== null && w.cert_days !== undefined ? w.cert_days : w.served_cert_days})}</td>
       <td class="sub">${esc(w.main)}</td><td>${openBtn(w.report, w.hash)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No website of this domain is protected by the WAF assessed.</p>';
   const exp = a.expiries.length ? `<table class="keys asset-exp">${a.expiries.map(e => `<tr><td>${esc(e.name)}</td><td class="faint">${esc(e.kind)}, ${esc(e.source)}</td><td class="mono">${esc(e.date || '')}</td><td class="r">${expiryTxt(e)}</td></tr>`).join('')}</table>`
@@ -201,6 +224,9 @@ const SIG_LABEL = {
   WEB_BYPASS: 'Set the website back to active mode in the WAF', WEB_ORIGIN_EXPOSED: 'Restrict the origin to the WAF addresses only',
   WEB_NOT_BLOCKING: 'Set SQL injection, XSS, RFI and illegal resource access to block', DNS_TAKEOVER: 'Remove the reference or register the domain',
   MAIL_SPOOFABLE: 'Move DMARC to p=quarantine, then p=reject', EXPIRED: 'Renew now', EXPIRING: 'Plan the renewal',
+  DNS_AXFR_OPEN: 'Allow zone transfers only to the secondary name servers (ACL or TSIG)',
+  WEB_NO_CAA: 'Publish CAA records naming only the certificate authorities you use',
+  DATA_INCOMPLETE: 'Re-run the assessment with every check, or fix the DNS / API errors shown in the report',
   DNS_NOT_MONITORED: 'Coverage gap: add the domain to the DNS / e-mail assessment'};
 function assetsView() { return S.asset ? assetDetail(AS.find(a => a.key === S.asset)) : assetList(); }
 function assetsCard() {
@@ -214,7 +240,8 @@ function assetsCard() {
 }
 
 /* ---------- state & routing: #/overview, #/trends, #/assets[?a=<asset>|?f=<filter>] or #/r/<id>?h=<report hash> ---------- */
-const S = {route: 'overview', id: null, asset: null, af: 'all', aq: ''};
+const S = {route: 'overview', id: null, asset: null, af: 'all', aq: '', asort: {k: 'risk', d: 1}, apage: 1};
+let aqTimer = null;
 function toHash() { if (S.route === 'trends') return '#/trends';
   if (S.route === 'assets') return '#/assets' + (S.asset ? '?a=' + encodeURIComponent(S.asset) : S.af !== 'all' ? '?f=' + S.af : ''); if (S.route !== 'r') return '#/overview'; const f = frames[S.id]; return `#/r/${S.id}${f && f.hash ? '?h=' + encodeURIComponent(f.hash) : ''}`; }
 function fromHash() {
@@ -279,9 +306,23 @@ function topbar() {
 function chrome() { $('#side').innerHTML = side(); $('#topbar').innerHTML = topbar(); }
 
 /* ---------- overview ---------- */
+const MAXAGE = M.max_age_days || {dns: 2, waf: 2, zta: 35};
+function fresh(r) {
+  const t = Date.parse(r.date), age = isNaN(t) ? null : (Date.now() - t) / 864e5, lim = MAXAGE[r.type];
+  return {age, lim, stale: age !== null && lim !== undefined && age > lim,
+    txt: age === null ? '' : age < 1 ? 'today' : `${Math.floor(age)} day${Math.floor(age) === 1 ? '' : 's'} old`};
+}
+const freshTag = r => { const f = fresh(r); if (f.age === null) return '';
+  return `<span class="fresh${f.stale ? ' stale' : ''}" title="Data from ${esc(fmtD(r.date))}; flagged as stale after ${esc(f.lim)} days">${f.stale ? '\u26A0 ' : ''}Data ${esc(f.txt)}${f.stale ? ` (limit ${esc(f.lim)} days)` : ''}</span>`; };
+function staleBanner() {
+  const st = RP.filter(r => r.exec && fresh(r).stale);
+  if (!st.length) return '';
+  return `<div class="card stale-banner" role="status"><b>Incomplete picture:</b> ${st.map(r => `${esc(r.label)} data is ${esc(fresh(r).txt)} (limit ${esc(fresh(r).lim)} days)`).join('; ')}.
+    Figures for ${st.length === 1 ? 'this area' : 'these areas'} may not reflect the current state: re-run the assessment.</div>`;
+}
 const deltaTxt = d => !d || (d.improved === null && d.worsened === null) ? '' :
   `<span class="delta-up">${d.improved || 0} better</span>, <span class="delta-down">${d.worsened || 0} worse</span> since the baseline`;
-const AREA_ST = {good: ['On track', 'pass'], warn: ['Needs attention', 'warn'], bad: ['At risk', 'fail'], unknown: ['No data', 'na']};
+const AREA_ST = {good: ['On track', 'pass'], warn: ['Needs attention', 'warn'], bad: ['At risk', 'fail'], unknown: ['Not verified', 'na']};
 const NOUN = {dns: ['domain', 'domains'], waf: ['website', 'websites']};
 function tone(k) {
   if (k.value === null || k.value === undefined) return 'na';
@@ -296,7 +337,7 @@ function overview() {
   const order = ['spoof', 'waf', 'zt', 'mfa', 'pr', 'dev'];
   const kpis = areas.flatMap(r => r.exec.kpis.map(k => ({...k, r}))).sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key)).slice(0, 6);
   const hero = `<section class="card exec-hero"><div><p class="exec-kicker">${esc(M.title)}</p><h2 class="exec-headline">${esc(PF.sentence || '')}</h2>
-      <div class="exec-chips">${RP.map(r => { const st = AREA_ST[(r.exec || {}).status || 'unknown']; return `<button class="exec-chip" data-open="${r.id}"><i class="dot c-${st[1]}"></i>${esc(r.label)}<span>${esc(st[0])}</span></button>`; }).join('')}</div></div>
+      <div class="exec-chips">${RP.map(r => { const st = AREA_ST[(r.exec || {}).status || 'unknown']; return `<button class="exec-chip" data-open="${r.id}"><i class="dot c-${st[1]}"></i>${esc(r.label)}<span>${esc(st[0])}${fresh(r).stale ? ' \u00b7 stale data' : ''}</span></button>`; }).join('')}</div></div>
     <div class="exec-meta">${RP.length} report${RP.length === 1 ? '' : 's'}<br>Portal generated ${esc(M.generated)}</div></section>`;
   const kpiHtml = kpis.length ? `<div class="exec-kpis" style="--kcols:${kpis.length <= 4 ? kpis.length : 3}">${kpis.map(k => { const t = tone(k), v = k.value === null || k.value === undefined ? null : k.value;
     return `<button class="exec-kpi t-${t}" data-go="${k.r.id}" data-h="${esc(k.hash)}" title="Open in ${esc(k.r.label)}">
@@ -306,7 +347,7 @@ function overview() {
   const areaHtml = `<div class="exec-areas">${RP.map(r => { const x = r.exec, st = AREA_ST[(x || {}).status || 'unknown'];
     return `<section class="card exec-area"><header><span class="hub-type">${icon(r.type)}${esc(r.label)}</span><span class="act"><span class="pill s-${st[1]}">${esc(st[0])}</span></span></header>
       <div class="body"><div class="exec-area-head"><span class="letter g-${esc(r.grade)}">${esc(r.grade)}</span><div><b class="num">${r.score === null || r.score === undefined ? '-' : esc(r.score)}<small>/100</small></b>
-        <div class="lbl">${esc(r.subtitle || r.title)}</div>${histDelta(seriesFor('score', r)) || (x ? trendChip(x.trend, r.type === 'zta' ? ' pts' : ' pts avg') : '')}</div>${spark(seriesFor('score', r)) ? `<div class="area-spark">${spark(seriesFor('score', r))}</div>` : ''}</div>
+        <div class="lbl">${esc(r.subtitle || r.title)}</div>${freshTag(r)}${histDelta(seriesFor('score', r)) || (x ? trendChip(x.trend, r.type === 'zta' ? ' pts' : ' pts avg') : '')}</div>${spark(seriesFor('score', r)) ? `<div class="area-spark">${spark(seriesFor('score', r))}</div>` : ''}</div>
       ${x ? `<ul class="exec-side">${x.side.map(([l, v, tn]) => `<li><span>${esc(l)}</span><b class="tx-${esc(tn)}">${esc(v)}</b></li>`).join('')}</ul>` : '<p class="muted">Not a Guard report: open it to view the content.</p>'}
       <button class="btn" data-open="${r.id}" style="margin-top:auto;align-self:flex-start">Open report</button></div></section>`; }).join('')}</div>`;
   const acts = PF.actions || [];
@@ -322,7 +363,7 @@ function overview() {
     ${risks.map(t => `<tr data-go="${t.r.id}" data-h="${esc(t.hash)}"><td class="nowrap"><span class="hub-type">${icon(t.r.type, 14)}${esc(t.r.label)}</span></td><td class="sticky"><button class="dom" style="word-break:normal" data-go="${t.r.id}" data-h="${esc(t.hash)}">${esc(t.item)}</button></td>
       <td>${riskCell(t)}</td><td class="sub">${esc(t.detail)}</td></tr>`).join('')}</tbody></table></div></details>` : '';
   return `<div class="print-head"><h1>${esc(M.title || 'GuardHub')}</h1><p class="muted">Generated ${esc(M.generated)}</p></div>
-    ${areaHtml}
+    ${staleBanner()}${areaHtml}
     ${kpiHtml ? `<div class="section-title exec-sec"><h2>Key indicators</h2><p>Outcomes measured across all reports. Select one to see the affected items.</p></div>${kpiHtml}` : ''}
     ${actHtml}${assetsCard()}${detail}
     <p class="faint exec-note">Each tool scores on its own scale: grades are not comparable across areas. Targets on the bars mark the expected end state.</p>`;
@@ -416,7 +457,9 @@ document.addEventListener('click', e => {
   if (ds.trends !== undefined) { page('trends'); return; }
   if (ds.assets !== undefined) { openAsset(null); return; }
   if (ds.asset) { openAsset(ds.asset); window.scrollTo(0, 0); return; }
-  if (ds.af) { S.af = ds.af; history.replaceState(null, '', toHash()); render(); return; }
+  if (ds.af) { S.af = ds.af; S.apage = 1; history.replaceState(null, '', toHash()); render(); return; }
+  if (ds.asort) { const k = ds.asort; S.asort = {k, d: S.asort && S.asort.k === k ? -S.asort.d : 1}; S.apage = 1; $('#view').innerHTML = assetsView(); return; }
+  if (ds.apage) { S.apage = +ds.apage; $('#view').innerHTML = assetsView(); const g = $('.asset-grid'); if (g) g.scrollIntoView({block: 'start'}); return; }
   if (ds.open) { if (S.route === 'r' && S.id === ds.open && frames[ds.open]) tell(ds.open, {mgHubClick: {route: 'overview'}}); else open(ds.open, ''); return; }
   if (ds.subRoute) { tell(S.id, {mgHubClick: {route: ds.subRoute}}); frames[S.id].el.focus(); return; }
   if (ds.subPillar) { tell(S.id, {mgHubClick: {pillar: ds.subPillar}}); frames[S.id].el.focus(); return; }
@@ -434,7 +477,10 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('input', e => {
   if (e.target.id === 'pal-q' && pal) { pal.items = paletteItems(e.target.value); pal.idx = 0; renderPalette(); }
-  if (e.target.id === 'aq') { const pos = e.target.selectionStart; S.aq = e.target.value; $('#view').innerHTML = assetsView(); const n = $('#aq'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }
+  if (e.target.id === 'aq') {  // filter after a short pause: a large inventory is not re-rendered at every key
+    S.aq = e.target.value; S.apage = 1; clearTimeout(aqTimer);
+    aqTimer = setTimeout(() => { const el = $('#aq'), pos = el ? el.selectionStart : null; $('#view').innerHTML = assetsView(); const n = $('#aq'); if (n) { n.focus(); if (pos !== null) n.setSelectionRange(pos, pos); } }, 140);
+  }
 });
 document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); pal ? closeOverlay() : openPalette(); return; }

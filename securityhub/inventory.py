@@ -29,6 +29,48 @@ REG_WARN_DAYS, REG_CRIT_DAYS = 60, 14
 WAF_BYPASS_CODES = {"ORIGIN_EXPOSED", "DNS_NOT_ROUTED", "WAF_POLICY_DISABLED", "ALLOW_BROAD_IP", "WAF_NO_POLICY"}
 
 
+# ---------------------------------------------------------------------------
+# What was actually measured. A control that was not run, or whose query failed, is UNKNOWN:
+# it must never be reported as an exposure (a resolver outage is not "every domain is spoofable").
+# ---------------------------------------------------------------------------
+
+UNMEASURED_DNS_PROFILES = {"nonexistent", "unreachable"}
+UNKNOWN_STATUSES = {"dns_error", "skipped", "unknown", "error", None, ""}
+
+
+def dns_measured(r: dict) -> bool:
+    """The domain answered: its results describe its configuration."""
+    return r.get("profile") not in UNMEASURED_DNS_PROFILES
+
+
+def dmarc_state(r: dict) -> str:
+    """'enforced', 'spoofable' or 'unknown' (not checked, DNS error, domain unreachable)."""
+    d = r.get("dmarc") or {}
+    if not dns_measured(r) or d.get("status") in UNKNOWN_STATUSES:
+        return "unknown"
+    enforced = d.get("policy") in ("quarantine", "reject") and int(d.get("pct") or 100) == 100
+    return "enforced" if enforced else "spoofable"
+
+
+def waf_measured(r: dict) -> bool:
+    return r.get("profile") != "error"
+
+
+def waf_protected(r: dict) -> Optional[bool]:
+    """True / False when known; None when the WAF rules were not checked or could not be read."""
+    if r.get("profile") == "bypass":
+        return False
+    codes = {i.get("code") for i in r.get("issues") or []}
+    if codes & WAF_BYPASS_CODES:
+        return False
+    owasp = (r.get("compliance") or {}).get("owasp_block")
+    if owasp == "pass":
+        return True
+    if owasp == "fail" and waf_measured(r):
+        return False
+    return None
+
+
 def registrable(host: str) -> str:
     """Best-effort registrable domain without the Public Suffix List (used only for unmatched websites)."""
     labels = [x for x in host.lower().strip(".").split(".") if x]
@@ -63,11 +105,16 @@ def _first(issues: List[dict]) -> str:
 
 def _dns_item(r: dict, report: str) -> dict:
     dmarc = r.get("dmarc") or {}
-    policy = dmarc.get("policy") or "missing"
-    enforced = policy in ("quarantine", "reject") and int(dmarc.get("pct") or 100) == 100
-    return {"domain": r.get("domain"), "score": r.get("overall_score"), "grade": grade(r.get("overall_score")),
+    state = dmarc_state(r)
+    measured = dns_measured(r)
+    policy = (dmarc.get("policy") or "missing") if state != "unknown" else (
+        "not checked" if dmarc.get("status") == "skipped" else "unknown")
+    score = r.get("overall_score") if measured else None
+    return {"domain": r.get("domain"), "score": score, "grade": grade(score), "measured": measured,
             "profile": r.get("profile"), "tier": r.get("tier", "medium"), "owner": r.get("owner", ""), "bu": r.get("bu", ""),
-            "dmarc": policy, "enforced": enforced, "spoofable": r.get("profile") != "nonexistent" and not enforced,
+            "dmarc": policy, "dmarc_state": state, "enforced": state == "enforced", "spoofable": state == "spoofable",
+            "caa": (r.get("caa") or {}).get("status"), "axfr": (r.get("axfr") or {}).get("status"),
+            "axfr_open": [s.get("ns") for s in (r.get("axfr") or {}).get("servers") or [] if s.get("result") == "open"],
             "spf": (r.get("spf") or {}).get("status"), "mta_sts": (r.get("mta_sts") or {}).get("status"),
             "dnssec": (r.get("dnssec") or {}).get("status"), "takeover": (r.get("takeover") or {}).get("status"),
             "registration_expires": (r.get("takeover") or {}).get("domain_expires"),
@@ -78,11 +125,10 @@ def _dns_item(r: dict, report: str) -> dict:
 def _waf_item(r: dict, report: str) -> dict:
     codes = {i.get("code") for i in r.get("issues") or []}
     tls = ((r.get("checks") or {}).get("tls") or {}).get("data") or {}
-    protected = (r.get("profile") != "bypass" and (r.get("compliance") or {}).get("owasp_block") == "pass"
-                 and not codes & WAF_BYPASS_CODES)
-    return {"domain": str(r.get("domain") or ""), "site_id": r.get("site_id"), "score": r.get("overall_score"),
-            "grade": grade(r.get("overall_score")), "profile": r.get("profile"), "tier": r.get("tier", "medium"),
-            "owner": r.get("owner", ""), "bu": r.get("bu", ""), "protected": protected,
+    score = r.get("overall_score") if waf_measured(r) else None
+    return {"domain": str(r.get("domain") or ""), "site_id": r.get("site_id"), "score": score, "measured": waf_measured(r),
+            "grade": grade(score), "profile": r.get("profile"), "tier": r.get("tier", "medium"),
+            "owner": r.get("owner", ""), "bu": r.get("bu", ""), "protected": waf_protected(r),
             "origin_exposed": "ORIGIN_EXPOSED" in codes, "account": r.get("account_name") or r.get("account_id"),
             "cert": tls.get("certificate"), "cert_expires": tls.get("expires"), "cert_days": tls.get("days_left"),
             "served_cert_days": tls.get("served_cert_days"),
@@ -97,8 +143,8 @@ def _signal(sev: str, code: str, text: str, report: Optional[str] = None, hash_:
 def _signals(asset: dict, now: datetime) -> List[dict]:
     out: List[dict] = []
     dns, web = asset["dns"], asset["web"]
-    spoofable = [d for d in dns if d["spoofable"] and d["profile"] in ("mail", "non-mail")]
-    unprotected = [w for w in web if not w["protected"]]
+    spoofable = [d for d in dns if d["spoofable"]]
+    unprotected = [w for w in web if w["protected"] is False]
     if spoofable and unprotected:
         w = unprotected[0]
         out.append(_signal("critical", "WEB_AND_MAIL_EXPOSED",
@@ -109,9 +155,12 @@ def _signals(asset: dict, now: datetime) -> List[dict]:
             out.append(_signal("critical", "WEB_BYPASS", f"{w['domain']}: WAF in bypass, traffic is not inspected", w["report"], w["hash"]))
         elif w["origin_exposed"]:
             out.append(_signal("critical", "WEB_ORIGIN_EXPOSED", f"{w['domain']}: origin reachable bypassing the WAF", w["report"], w["hash"]))
-        elif not w["protected"]:
+        elif w["protected"] is False:
             out.append(_signal("warning", "WEB_NOT_BLOCKING", f"{w['domain']}: WAF does not block the core attacks (OWASP)", w["report"], w["hash"]))
     for d in dns:
+        if d["axfr_open"]:
+            out.append(_signal("critical", "DNS_AXFR_OPEN", f"{d['domain']}: zone transfer allowed by {', '.join(d['axfr_open'])}",
+                               d["report"], d["hash"]))
         if d["takeover"] == "error":
             out.append(_signal("critical", "DNS_TAKEOVER", f"{d['domain']}: a dependency can be taken over (unregistered or dangling)", d["report"], d["hash"]))
         if d in spoofable and not (unprotected and d is spoofable[0]):
@@ -127,6 +176,16 @@ def _signals(asset: dict, now: datetime) -> List[dict]:
         elif days <= warn:
             out.append(_signal("critical" if days <= crit else "warning", "EXPIRING",
                                f"{e['name']}: {e['kind']} expires in {days} days ({e['date']})", e["report"], e["hash"]))
+    if web and any(d["caa"] == "missing" for d in dns):
+        d = next(d for d in dns if d["caa"] == "missing")
+        out.append(_signal("warning", "WEB_NO_CAA", f"{d['domain']} publishes websites but no CAA record: any certificate "
+                                                    "authority may issue certificates for it", d["report"], d["hash"]))
+    unknown = [d["domain"] for d in dns if not d["measured"] or d["dmarc_state"] == "unknown"] + \
+              [w["domain"] for w in web if not w["measured"] or w["protected"] is None]
+    if unknown:
+        out.append(_signal("info", "DATA_INCOMPLETE", f"Not verified: {', '.join(unknown[:3])}{' and others' if len(unknown) > 3 else ''} "
+                                                      "(control not run, DNS or API error) - not counted as exposed",
+                           (dns[0] if dns else web[0])["report"], ""))
     if web and not dns and asset["dns_assessed"]:
         out.append(_signal("warning", "DNS_NOT_MONITORED",
                            f"{asset['key']} hosts {len(web)} website{'s' if len(web) > 1 else ''} but is not in the DNS / e-mail assessment",
@@ -202,15 +261,17 @@ def build(reports: List[dict], now: Optional[datetime] = None) -> dict:
         a["tier"] = _tier(*(i["tier"] for i in items))
         a["owners"] = sorted({i["owner"] for i in items if i.get("owner")})
         a["bus"] = sorted({i["bu"] for i in items if i.get("bu")})
-        scores = [i["score"] for i in items if i.get("score") is not None and i.get("profile") != "nonexistent"]
+        scores = [i["score"] for i in items if i.get("score") is not None]
         a["score"] = min(scores) if scores else None
-        a["dns_score"] = min((d["score"] for d in a["dns"] if d["profile"] != "nonexistent" and d["score"] is not None), default=None)
+        a["dns_score"] = min((d["score"] for d in a["dns"] if d["score"] is not None), default=None)
         a["web_score"] = min((w["score"] for w in a["web"] if w["score"] is not None), default=None)
         sev = {s["severity"] for s in a["signals"]}
+        incomplete = any(s["code"] == "DATA_INCOMPLETE" for s in a["signals"])
         a["status"] = ("bad" if "critical" in sev or (a["score"] is not None and a["score"] < 50) else
                        "warn" if "warning" in sev or (a["score"] is not None and a["score"] < 80) else
-                       "good" if a["score"] is not None else "unknown")
+                       "good" if a["score"] is not None and not incomplete else "unknown")  # never "on track" on partial data
         a["coverage_gap"] = any(s["code"] == "DNS_NOT_MONITORED" for s in a["signals"])
+        a["incomplete"] = any(s["code"] == "DATA_INCOMPLETE" for s in a["signals"])
         a["next_expiry"] = next((e for e in a["expiries"] if e["days"] is not None), None)
         del a["dns_assessed"]
         out.append(a)
@@ -220,7 +281,8 @@ def build(reports: List[dict], now: Optional[datetime] = None) -> dict:
                             a["score"] if a["score"] is not None else 101, a["key"]))
     summary = {"total": len(out), "at_risk": sum(a["status"] == "bad" for a in out),
                "attention": sum(a["status"] == "warn" for a in out), "on_track": sum(a["status"] == "good" for a in out),
-               "coverage_gaps": sum(a["coverage_gap"] for a in out),
+               "coverage_gaps": sum(a["coverage_gap"] for a in out), "incomplete": sum(a["incomplete"] for a in out),
+               "unknown": sum(a["status"] == "unknown" for a in out),
                "websites": sum(len(a["web"]) for a in out), "domains": sum(len(a["dns"]) for a in out),
                "expiring": sum(1 for a in out for e in a["expiries"] if e["days"] is not None and e["days"] <= CERT_WARN_DAYS)}
     return {"assets": out, "summary": summary}
