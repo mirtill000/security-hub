@@ -1,0 +1,154 @@
+{
+ "contoso.example": {
+  "SOA": [
+   "ns1.contoso.example. hostmaster.contoso.example. 1 7200 3600 1209600 3600"
+  ],
+  "NS": [
+   "ns1.contoso.example",
+   "ns2.contoso.example"
+  ],
+  "MX": [
+   [
+    10,
+    "contoso-example.mail.protection.outlook.com"
+   ]
+  ],
+  "TXT": [
+   "v=spf1 include:spf.protection.outlook.com -all",
+   "MS=ms12345678"
+  ],
+  "A": [
+   "203.0.113.10"
+  ]
+ },
+ "_dmarc.contoso.example": {
+  "TXT": [
+   "v=DMARC1; p=reject; rua=mailto:dmarc@contoso.example; adkim=s; aspf=s"
+  ]
+ },
+ "selector1._domainkey.contoso.example": {
+  "TXT": [
+   "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmtmkQ3ZUw/NOTxbQ2VdzzewyZCkBl6DVWo6IfiguOX636p0nXqgFZd38RQUSsi+SqtVd8nfKV5ls1QLHfyhkjrp4NE2lkdDzuTpulddlfyTLwXmRmwsT8eYkTPX6i9IEBqQY5A1AiJZv8KHZcFbsib7c2Ld7lWGMTyo2W44nNux7dxwFPKdfdtrXv6pD2RPDrRoi7uymQStWIuRnOUN5MWC5uT3glmRnRQIGHd6GviOV/9w5PEJ2zI4Hn9nCy6mYh9Jua3pyshdCY877VnGCQCRPf8q66b2DQoCkJpoO35AMmpl6bZH2NHS2K1Ea7goWW9Y1PhlvwqDWoazlhCKZcQIDAQAB"
+  ]
+ },
+ "_mta-sts.contoso.example": {
+  "TXT": [
+   "v=STSv1; id=20260101"
+  ]
+ },
+ "_smtp._tls.contoso.example": {
+  "TXT": [
+   "v=TLSRPTv1; rua=mailto:tlsrpt@contoso.example"
+  ]
+ },
+ "contoso-example.mail.protection.outlook.com": {
+  "A": [
+   "52.101.0.1"
+  ]
+ },
+ "spf.protection.outlook.com": {
+  "TXT": [
+   "v=spf1 ip4:40.92.0.0/15 ip4:52.100.0.0/14 -all"
+  ]
+ },
+ "ns1.contoso.example": {
+  "A": [
+   "203.0.113.53"
+  ]
+ },
+ "ns2.contoso.example": {
+  "A": [
+   "198.51.100.53"
+  ]
+ },
+ "www.contoso.example": {
+  "CNAME": [
+   "x1.impervadns.net"
+  ]
+ },
+ "shop.contoso.example": {
+  "CNAME": [
+   "x2.impervadns.net"
+  ]
+ },
+ "legacy.contoso.example": {
+  "A": [
+   "203.0.113.80"
+  ]
+ },
+ "fabrikam.example": {
+  "SOA": [
+   "ns1.fabrikam.example. hostmaster.fabrikam.example. 1 7200 3600 1209600 3600"
+  ],
+  "NS": [
+   "ns1.fabrikam.example"
+  ],
+  "MX": [
+   [
+    10,
+    "mx.fabrikam.example"
+   ]
+  ],
+  "TXT": [
+   "v=spf1 a mx include:_spf.mailhost.example ~all"
+  ]
+ },
+ "_dmarc.fabrikam.example": {
+  "TXT": [
+   "v=DMARC1; p=none"
+  ]
+ },
+ "mx.fabrikam.example": {
+  "A": [
+   "192.0.2.25"
+  ]
+ },
+ "ns1.fabrikam.example": {
+  "A": [
+   "192.0.2.53"
+  ]
+ },
+ "_spf.mailhost.example": {
+  "TXT": [
+   "v=spf1 ip4:192.0.2.0/24 ~all"
+  ]
+ },
+ "contoso-old.example": {
+  "SOA": [
+   "ns1.contoso.example. hostmaster.contoso.example. 1 7200 3600 1209600 3600"
+  ],
+  "NS": [
+   "ns1.contoso.example"
+  ],
+  "MX": [
+   [
+    0,
+    "."
+   ]
+  ],
+  "TXT": [
+   "v=spf1 -all"
+  ]
+ },
+ "_dmarc.contoso-old.example": {
+  "TXT": [
+   "v=DMARC1; p=reject"
+  ]
+ },
+ "outlook.com": {
+  "NS": [
+   "ns1-proddns.glbdns.o365filtering.com"
+  ],
+  "SOA": [
+   "ns1. h. 1 1 1 1 1"
+  ]
+ },
+ "mailhost.example": {
+  "NS": [
+   "ns1.mailhost.example"
+  ],
+  "SOA": [
+   "ns1. h. 1 1 1 1 1"
+  ]
+ }
+}

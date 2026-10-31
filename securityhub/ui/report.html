@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark light">
+<title>__TITLE__</title>
+<style>__CSS__</style>
+</head>
+<body>
+<button class="skip" type="button" onclick="document.getElementById('view').focus()">Skip to content</button>
+<div class="app">
+  <aside class="side" id="side" aria-label="Navigation"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content" id="view" tabindex="-1"></main>
+  </div>
+</div>
+<div id="drawer-root"></div>
+<div id="overlay-root"></div>
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+__NOSCRIPT__<script type="application/json" id="mg-data">__DATA__</script>
+<script>__JS__</script>
+</body>
+</html>

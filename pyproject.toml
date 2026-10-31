@@ -28,5 +28,8 @@ version = { attr = "securityhub.__version__" }
 [tool.setuptools.packages.find]
 include = ["securityhub*"]
 
+[tool.setuptools.package-data]
+"securityhub.ui" = ["*.css", "*.js", "*.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

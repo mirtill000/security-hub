@@ -1,0 +1,45 @@
+/* @include base.css */
+
+.viz-panel { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--panel-2); padding: 10px 14px; margin-bottom: 14px; }
+.viz-panel > summary { cursor: pointer; padding: 4px 0; } .viz-panel .card.viz { background: var(--panel); }
+.viz-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 430px), 1fr)); gap: 16px; margin-bottom: 24px; }
+.card.viz { display: flex; flex-direction: column; }
+.card.viz .body { flex: 1; display: flex; flex-direction: column; justify-content: space-between; }
+.viz-sub { color: var(--muted); font-size: 12.5px; padding: 4px 18px 0; margin: 0; }
+.sankey { width: 100%; height: auto; display: block; }
+.sankey .sk-link { opacity: .55; transition: opacity .15s; } .sankey .sk-link:hover { opacity: .9; }
+.sankey .sk-lbl { font-size: 11.5px; fill: var(--text); font-family: var(--font); paint-order: stroke; stroke: var(--panel); stroke-width: 3px; stroke-linejoin: round; }
+.sankey .sk-pct { fill: var(--muted); font-size: 10.5px; }
+.viz-foot { display: flex; flex-wrap: wrap; gap: 8px 0; border-top: 1px solid var(--line); margin-top: 12px; padding-top: 10px; }
+.viz-foot > div { flex: 1 1 90px; display: grid; gap: 1px; padding-right: 10px; }
+.viz-foot > div + div { border-left: 1px solid var(--line); padding-left: 12px; }
+.viz-foot span { font-size: 12px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+.viz-foot b { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.2; } .viz-foot b small { font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 2px; }
+.donut-wrap { display: grid; place-items: center; padding: 6px 0 14px; } .donut { width: 190px; height: 190px; }
+.donut .dn-v { fill: var(--text); font-size: 26px; font-weight: 700; font-family: var(--font); } .donut .dn-l { fill: var(--muted); font-size: 12px; font-family: var(--font); }
+.osb { display: grid; gap: 14px; padding: 6px 0 14px; } .osb-row { display: grid; grid-template-columns: 70px 1fr 120px; gap: 10px; align-items: center; font-size: 12.5px; }
+.osb-row > span:first-child { color: var(--muted); text-align: right; } .osb-track { height: 22px; }
+.osb-tot { height: 100%; min-width: 2px; border-radius: 4px; background: color-mix(in srgb, var(--accent) 35%, transparent); overflow: hidden; }
+.osb-tot i { display: block; height: 100%; background: var(--accent); }
+.nav-sep { font-size: 11.5px; color: var(--faint); padding: 14px 10px 4px; }
+.nav-item.on { background: var(--hover); color: var(--text); }
+.pdot { width: 9px; height: 9px; border-radius: 50%; background: var(--none); flex: none; margin: 0 3px; }
+.pdot.hi { background: var(--pass); } .pdot.mid { background: var(--warn); } .pdot.lo { background: var(--fail); }
+.st-badge { width: 56px; height: 56px; border-radius: 14px; display: grid; place-items: center; font-size: 26px; font-weight: 700; flex: none; }
+.lvl { font-size: 12.5px; white-space: nowrap; } .lvl-high { color: var(--fail-text); font-weight: 600; } .lvl-medium { color: var(--warn-text); } .lvl-low { color: var(--muted); } .lvl-unknown { color: var(--faint); }
+tr.grp td { background: var(--panel-2) !important; cursor: default; font-size: 13px; }
+.chg-up { color: var(--pass-text); border-color: color-mix(in srgb, var(--pass) 45%, transparent); }
+.chg-down { color: var(--fail-text); border-color: color-mix(in srgb, var(--fail) 45%, transparent); }
+.md { font-size: 13.5px; line-height: 1.6; overflow-wrap: anywhere; }
+.md p { margin: 0 0 10px; } .md .md-h { margin: 16px 0 8px; font-size: 14px; } .md h3.md-h { font-size: 15px; }
+.md code { background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.md-list { margin: 0 0 10px; padding-left: 20px; } .md-list li { margin: 2px 0; }
+.md-table { overflow-x: auto; margin: 8px 0 12px; border: 1px solid var(--line); border-radius: var(--r); }
+.md-table table { border-collapse: collapse; width: 100%; } .md-table th, .md-table td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; font-size: 12.5px; }
+.md-table th { background: var(--panel-2); color: var(--muted); font-weight: 600; } .md-table tr:last-child td { border-bottom: 0; }
+.md-hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
+.kvtree { display: grid; gap: 4px; font-size: 13px; } .kvtree details > summary { cursor: pointer; padding: 3px 0; }
+.kvtree-in { padding-left: 16px; border-left: 1px solid var(--line); margin: 4px 0 6px 4px; }
+.kvrow { display: grid; grid-template-columns: minmax(140px, 260px) 1fr; gap: 12px; padding: 2px 0; } .kvrow > span:first-child { color: var(--muted); }
+
+/* @include print-head.css */

@@ -167,7 +167,7 @@ class DnsRunTest(TempDirTest):
         self.assertIn(code, (EXIT_OK, EXIT_FAIL_UNDER))
         run = orch.list_runs(self.path("out"))[0]
         with open(os.path.join(run, "dns.json"), encoding="utf-8") as f:
-            self.assertEqual(sorted(r["domain"] for r in json.load(f)), ["contoso.example", "mail.contoso.example"])
+            self.assertEqual(sorted(r["domain"] for r in json.load(f)), ["contoso-old.example", "contoso.example", "fabrikam.example"])
 
 
 if __name__ == "__main__":

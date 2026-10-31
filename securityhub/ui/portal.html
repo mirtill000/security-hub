@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-src blob:">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark light">
+<title>__TITLE__</title>
+<style>__CSS__</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side" aria-label="Reports"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content" id="view" tabindex="-1"></main>
+    <div id="frames"></div>
+  </div>
+</div>
+<div id="overlay-root"></div>
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+<noscript><p style="padding:24px">The portal needs JavaScript.</p></noscript>
+<script type="application/json" id="hub-data">__DATA__</script>
+__REPORTS__
+<script>__JS__</script>
+</body>
+</html>

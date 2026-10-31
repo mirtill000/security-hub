@@ -1,3 +1,4 @@
 domain;tier;owner;bu;tags
 contoso.example;critical;it-sec;corp;brand
-mail.contoso.example;high;it;corp;
+fabrikam.example;high;marketing;retail;
+contoso-old.example;low;it;corp;parked

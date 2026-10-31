@@ -1,0 +1,8 @@
+/* @include base.css */
+.ddos-chart { width: 100%; height: auto; display: block; margin-top: 14px; }
+.ddos-chart .grid { stroke: var(--line); } .ddos-chart .ax { fill: var(--faint); font-size: 10px; font-family: var(--font); }
+.ddos-chart .area { fill: color-mix(in srgb, var(--accent) 16%, transparent); } .ddos-chart .ln { fill: none; stroke: var(--accent); stroke-width: 1.6; }
+.ddos-chart .blk { fill: none; stroke: var(--dns); stroke-width: 1; stroke-dasharray: 3 3; }
+.ddos-chart .thr { stroke: var(--fail); stroke-width: 1.5; stroke-dasharray: 6 4; } .ddos-chart .thr-t { fill: var(--fail-text); font-size: 11px; font-weight: 600; font-family: var(--font); }
+.ddos-chart .rec { stroke: var(--pass); stroke-width: 1.5; stroke-dasharray: 2 3; } .ddos-chart .rec-t { fill: var(--pass-text); font-size: 11px; font-weight: 600; font-family: var(--font); }
+/* @include print-head.css */
