@@ -380,7 +380,7 @@ def run(config_path: str, only: Optional[List[str]] = None, dry_run: bool = Fals
     try:
         lock = RunLock(out_dir).__enter__()
     except LockBusy as e:
-        say(err(f"Error: {e}. Wait for it to finish (or remove a stale run with care).", "red"))
+        say(err(f"Error: {e}. Wait for it to finish: the lock is released automatically when that run ends.", "red"))
         return EXIT_USAGE
     try:
         return _execute(cfg, plans, out_dir, stamp, when, run_dir, parallel, max_age, fail_under, quiet, verbose, say, err)
