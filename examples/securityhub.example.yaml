@@ -6,11 +6,14 @@ output_dir: reports                      # runs, portal and posture summary go h
 keep_runs: 12                            # older run folders are deleted (0 = keep all)
 # fail_under: 70                         # exit code 2 if an area / asset scores below this
 # auto_baseline: true                    # compare every module with its previous run
+# max_parallel: 3                        # modules run at the same time (1 = one after the other)
+# module_timeout: 3600                   # stop a module after this many seconds (per module: timeout)
 
 modules:
   # E-mail and DNS security of a domain portfolio (needs: pip install dnspython)
   dns:
     enabled: true
+    # timeout: 7200                      # large portfolios with lookalikes can take long
     input: domains.csv                   # text (one domain per line) or CSV with tier/owner/bu/tags
     options:
       checks: all,takeover               # add lookalikes,consistency for deeper (slower) scans

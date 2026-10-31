@@ -1,8 +1,12 @@
 import importlib.util
 import json
 import os
+import sys
+import threading
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 from securityhub import orchestrator as orch
 from securityhub.common import EXIT_FAIL_UNDER, EXIT_OK, EXIT_USAGE
@@ -119,7 +123,7 @@ class RunTest(TempDirTest):
     def test_only(self):
         self.assertEqual(self.run_hub(self.config(), T0, only=["zta"]), EXIT_OK)
         files = sorted(os.listdir(orch.list_runs(self.path("out"))[0]))
-        self.assertEqual(files, ["zta.html", "zta.json"])
+        self.assertEqual(files, ["zta.html", "zta.json", "zta.log"])
         with self.assertRaises(orch.ConfigError):
             orch.run(self.config(), only=["dns"])
 
@@ -168,6 +172,91 @@ class DnsRunTest(TempDirTest):
         run = orch.list_runs(self.path("out"))[0]
         with open(os.path.join(run, "dns.json"), encoding="utf-8") as f:
             self.assertEqual(sorted(r["domain"] for r in json.load(f)), ["contoso-old.example", "contoso.example", "fabrikam.example"])
+
+
+class ParallelTest(TempDirTest):
+    """T4: modules run in separate processes, in parallel, with timeouts and logs."""
+
+    def config(self, **extra):
+        cfg = {"output_dir": "out", "modules": {
+            "waf": {"options": {"from_json": fixture("waf_snapshot.json")}},
+            "zta": {"input": fixture("ZeroTrustAssessmentReport.json")}}}
+        cfg.update(extra)
+        p = self.path("c.json")
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(cfg, f)
+        return p
+
+    def concurrency(self, **kw):
+        lock, state = threading.Lock(), {"now": 0, "max": 0}
+        real = orch.run_module
+
+        def tracked(*a, **k):
+            with lock:
+                state["now"] += 1
+                state["max"] = max(state["max"], state["now"])
+            time.sleep(0.4)
+            try:
+                return real(*a, **k)
+            finally:
+                with lock:
+                    state["now"] -= 1
+        with mock.patch.object(orch, "run_module", tracked), silenced():
+            code = orch.run(self.config(**kw.pop("cfg", {})), now=T0, log=lambda m: None, **kw)
+        self.assertEqual(code, EXIT_OK)
+        return state["max"]
+
+    def test_modules_run_in_parallel(self):
+        self.assertEqual(self.concurrency(), 2)
+
+    def test_max_parallel_one_runs_in_sequence(self):
+        self.assertEqual(self.concurrency(max_parallel=1), 1)
+        self.assertEqual(self.concurrency(cfg={"max_parallel": 1}), 1)
+
+    def test_logs_and_posture_record_each_module(self):
+        with silenced():
+            orch.run(self.config(), now=T0, log=lambda m: None)
+        run = orch.list_runs(self.path("out"))[0]
+        with open(os.path.join(run, "waf.log"), encoding="utf-8") as f:
+            log = f.read()
+        self.assertTrue(log.startswith("$ securityhub waf "))
+        self.assertIn("Report generated", log)
+        with open(self.path("out", "posture.json"), encoding="utf-8") as f:
+            mods = {m["module"]: m for m in json.load(f)["run"]["modules"]}
+        self.assertEqual(mods["zta"]["log"], os.path.join(run, "zta.log"))
+        self.assertFalse(mods["zta"]["timed_out"])
+
+    def test_timeout_stops_the_module(self):
+        log = self.path("slow.log")
+        t0 = time.monotonic()
+        r = orch.run_module("slow", [], self.path("slow.html"), log, timeout=1,
+                            cmd=[sys.executable, "-c", "import time; print('started', flush=True); time.sleep(60)"])
+        self.assertLess(time.monotonic() - t0, 15)
+        self.assertTrue(r.timed_out)
+        self.assertIn("timed out", r.error)
+        with open(log, encoding="utf-8") as f:
+            self.assertIn("started", f.read())
+
+    def test_failure_shows_the_log_tail(self):
+        cfg = self.config()
+        with open(cfg, encoding="utf-8") as f:
+            data = json.load(f)
+        data["modules"]["zta"]["input"] = self.path("missing.json")
+        with open(cfg, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        lines = []
+        with silenced():
+            code = orch.run(cfg, now=T0, log=lines.append)
+        self.assertEqual(code, EXIT_USAGE)
+        text = "\n".join(lines)
+        self.assertIn("Microsoft Zero Trust", text)
+        self.assertIn("missing.json", text)  # the module's own error message, from its log
+
+    def test_invalid_parallel_and_timeout(self):
+        with self.assertRaises(orch.ConfigError):
+            orch.run(self.config(max_parallel=0), dry_run=True)
+        with self.assertRaises(orch.ConfigError):
+            orch.run(self.config(module_timeout="soon"), dry_run=True)
 
 
 if __name__ == "__main__":

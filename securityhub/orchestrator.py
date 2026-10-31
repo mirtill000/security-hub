@@ -20,18 +20,20 @@ from __future__ import annotations
 import argparse
 import contextlib
 import importlib
-import io
 import json
 import os
 import shutil
+import subprocess
 import sys
+import threading
 import time
-import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .common import EXIT_FAIL_UNDER, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE
+from .console import Progress, Style, fmt_secs, print_posture
 
 # name -> (module, positional argument fed from `input`, human label)
 MODULES: Dict[str, Tuple[str, Optional[str], str]] = {
@@ -60,11 +62,14 @@ output_dir: reports                      # runs, portal and posture summary go h
 keep_runs: 12                            # older run folders are deleted (0 = keep all)
 # fail_under: 70                         # exit code 2 if an area / asset scores below this
 # auto_baseline: true                    # compare every module with its previous run
+# max_parallel: 3                        # modules run at the same time (1 = one after the other)
+# module_timeout: 3600                   # stop a module after this many seconds (per module: timeout)
 
 modules:
   # E-mail and DNS security of a domain portfolio (needs: pip install dnspython)
   dns:
     enabled: true
+    # timeout: 7200                      # large portfolios with lookalikes can take long
     input: domains.csv                   # text (one domain per line) or CSV with tier/owner/bu/tags
     options:
       checks: all,takeover               # add lookalikes,consistency for deeper (slower) scans
@@ -106,6 +111,8 @@ class ModuleResult:
     report: Optional[str] = None
     error: str = ""
     argv: List[str] = field(default_factory=list)
+    log: str = ""
+    timed_out: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -239,40 +246,79 @@ def prune_runs(output_dir: str, keep: int) -> List[str]:
     return removed
 
 
-def run_module(name: str, argv: List[str], out_html: str, quiet: bool) -> ModuleResult:
+PKG_PARENT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_echo_lock = threading.Lock()
+
+
+def run_module(name: str, argv: List[str], out_html: str, log_path: str, timeout: Optional[float] = None,
+               echo: Optional[Callable[[str], None]] = None, procs: Optional[Dict[str, subprocess.Popen]] = None,
+               cmd: Optional[List[str]] = None) -> ModuleResult:
+    """Run one module in its own Python process; its output goes to `log_path` (and to `echo`, if given).
+
+    A separate process isolates the modules (state, crashes, memory), lets them run in parallel
+    and can be stopped when it exceeds `timeout` seconds.
+    """
     t0 = time.monotonic()
-    captured = io.StringIO()
-    error = ""
-    with contextlib.ExitStack() as stack:
-        if quiet:  # keep the module output, show it only if the module fails
-            stack.enter_context(contextlib.redirect_stdout(captured))
-            stack.enter_context(contextlib.redirect_stderr(captured))
+    env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
+    env["PYTHONPATH"] = PKG_PARENT + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    cmd = cmd or [sys.executable, "-m", "securityhub", name] + argv
+    timed_out = False
+    with open(log_path, "w", encoding="utf-8") as log:
+        log.write(f"$ securityhub {name} {' '.join(argv)}\n")
+        log.flush()
         try:
-            mod = importlib.import_module(MODULES[name][0])
-            code = mod.main(argv)
-        except KeyboardInterrupt:
-            raise
-        except SystemExit as e:  # argparse errors / --version
-            code = e.code if isinstance(e.code, int) else EXIT_USAGE
-        except ImportError as e:
-            code, error = EXIT_USAGE, str(e)
-        except Exception as e:  # one module must never stop the others
-            traceback.print_exc()
-            code, error = EXIT_USAGE, f"{type(e).__name__}: {e}"
-    code = code if isinstance(code, int) else EXIT_OK
-    report = out_html if os.path.isfile(out_html) and not error else None
-    if not report and not error:
-        error = "no report produced"
-    if quiet and (error or code not in (EXIT_OK, EXIT_FAIL_UNDER)):
-        tail = captured.getvalue().strip().splitlines()[-15:]
-        if tail:
-            print("\n".join(tail), file=sys.stderr)
-    return ModuleResult(name, code, time.monotonic() - t0, report, error, argv)
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env,
+                                    text=True, encoding="utf-8", errors="replace", bufsize=1)
+        except OSError as e:
+            return ModuleResult(name, EXIT_USAGE, time.monotonic() - t0, error=f"cannot start: {e}", argv=argv, log=log_path)
+        if procs is not None:
+            procs[name] = proc
+
+        def pump():
+            for line in proc.stdout:
+                log.write(line)
+                if echo:
+                    echo(f"[{name}] {line.rstrip()}")
+        reader = threading.Thread(target=pump, daemon=True)
+        reader.start()
+        try:
+            code = proc.wait(timeout=timeout or None)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            code = EXIT_USAGE
+        reader.join(timeout=5)
+        if procs is not None:
+            procs.pop(name, None)
+    seconds = time.monotonic() - t0
+    if timed_out:
+        return ModuleResult(name, code, seconds, None, f"timed out after {fmt_secs(timeout)}", argv, log_path, True)
+    if code < 0 or code == EXIT_INTERRUPTED:  # killed by a signal / interrupted
+        code = EXIT_INTERRUPTED
+    report = out_html if os.path.isfile(out_html) else None
+    error = "" if report else "no report produced"
+    return ModuleResult(name, code, seconds, report, error, argv, log_path)
+
+
+def _tail(path: str, n: int = 12) -> List[str]:
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return [line.rstrip() for line in f.readlines()[-n:]]
+    except OSError:
+        return []
 
 
 def run(config_path: str, only: Optional[List[str]] = None, dry_run: bool = False, quiet: bool = False,
-        output_dir: Optional[str] = None, now: Optional[datetime] = None,
-        log: Callable[[str], None] = lambda m: print(m, file=sys.stderr)) -> int:
+        output_dir: Optional[str] = None, now: Optional[datetime] = None, verbose: bool = False,
+        max_parallel: Optional[int] = None, timeout: Optional[float] = None,
+        log: Optional[Callable[[str], None]] = None) -> int:
+    err = Style(sys.stderr)
+    say = log or (lambda m: print(m, file=sys.stderr))
     cfg = load_config(config_path)
     base_dir = os.path.dirname(os.path.abspath(config_path))
     out_dir = _resolve(base_dir, output_dir or cfg.get("output_dir") or "reports")
@@ -290,6 +336,14 @@ def run(config_path: str, only: Optional[List[str]] = None, dry_run: bool = Fals
             raise ConfigError(f"not configured: {', '.join(sorted(missing))}")
     if not selected:
         raise ConfigError("no module enabled in the configuration")
+    try:
+        raw = max_parallel if max_parallel is not None else cfg.get("max_parallel")
+        parallel = len(selected) if raw is None else int(raw)
+    except (TypeError, ValueError):
+        raise ConfigError("max_parallel must be a number")
+    if parallel < 1:
+        raise ConfigError("max_parallel must be 1 or more")
+    default_timeout = timeout if timeout is not None else cfg.get("module_timeout")
 
     previous = list_runs(out_dir)
     when = now or datetime.now(timezone.utc)
@@ -300,85 +354,101 @@ def run(config_path: str, only: Optional[List[str]] = None, dry_run: bool = Fals
     run_dir = os.path.join(out_dir, RUNS_DIR, stamp)
     plans = []
     for name in selected:
+        spec = mods[name] or {}
         out_html = os.path.join(run_dir, f"{name}.html")
         baseline = previous_export(previous, name) if auto_baseline else None
-        plans.append((name, out_html, module_argv(name, mods[name] or {}, base_dir, out_html, baseline, fail_under)))
+        t = spec.get("timeout", default_timeout)
+        try:
+            t = float(t) if t not in (None, "", 0) else None
+        except (TypeError, ValueError):
+            raise ConfigError(f"{name}: timeout must be a number of seconds")
+        plans.append((name, out_html, module_argv(name, spec, base_dir, out_html, baseline, fail_under), t))
 
     if dry_run:
-        for name, _, argv in plans:
-            print(f"securityhub {name} {' '.join(argv)}")  # no secrets: they are rejected from the config
+        for name, _, argv, t in plans:  # no secrets: they are rejected from the configuration
+            print(f"securityhub {name} {' '.join(argv)}" + (f"    # timeout {fmt_secs(t)}" if t else ""))
         return EXIT_OK
 
     os.makedirs(run_dir, exist_ok=True)
-    results: List[ModuleResult] = []
-    for name, out_html, argv in plans:
-        log(f"\n=== {MODULES[name][2]} ===")
-        try:
-            results.append(run_module(name, argv, out_html, quiet))
-        except KeyboardInterrupt:
-            log("Interrupted.")
-            return EXIT_INTERRUPTED
-        r = results[-1]
-        log(f"--- {name}: exit {r.code} in {r.seconds:.0f}s" + (f" ({r.error})" if r.error else ""))
+    if not quiet:
+        say(err("Security Hub", "bold") + f" run {stamp}  {err.dot}  {len(plans)} module{'s' if len(plans) != 1 else ''}"
+            + (f", up to {min(parallel, len(plans))} in parallel" if parallel > 1 and len(plans) > 1 else "")
+            + f"  {err.dot}  {err(run_dir, 'dim')}")
+    labels = {n: MODULES[n][2] for n, *_ in plans}
+    progress = Progress([n for n, *_ in plans], labels, sys.stderr, enabled=not quiet, live=False if verbose else None)
 
-    if not any(r.report for r in results):
+    def echo(line: str) -> None:
+        with _echo_lock:
+            print(err(line, "dim"), file=sys.stderr, flush=True)
+
+    procs: Dict[str, subprocess.Popen] = {}
+    results: Dict[str, ModuleResult] = {}
+
+    def job(name, out_html, argv, t):
+        progress.start(name)
+        r = run_module(name, argv, out_html, os.path.join(run_dir, f"{name}.log"), t, echo if verbose else None, procs)
+        status = ("timeout" if r.timed_out else "interrupted" if r.code == EXIT_INTERRUPTED else
+                  "failed" if r.error or r.code not in (EXIT_OK, EXIT_FAIL_UNDER) else "below" if r.code == EXIT_FAIL_UNDER else "ok")
+        progress.finish(name, status, r.error)
+        return r
+
+    pool = ThreadPoolExecutor(max_workers=parallel, thread_name_prefix="module")
+    try:
+        with progress:
+            futures = {pool.submit(job, *plan): plan[0] for plan in plans}
+            for fut in as_completed(futures):
+                results[futures[fut]] = fut.result()
+    except KeyboardInterrupt:
+        for p in list(procs.values()):
+            with contextlib.suppress(OSError):
+                p.terminate()
+        pool.shutdown(wait=False, cancel_futures=True)
+        say(err("Interrupted.", "red"))
+        return EXIT_INTERRUPTED
+    finally:
+        pool.shutdown(wait=True)
+    ordered = [results[n] for n, *_ in plans if n in results]
+
+    for r in ordered:  # show why a module failed, from its log
+        if r.error or r.code not in (EXIT_OK, EXIT_FAIL_UNDER):
+            say("\n" + err(f"{labels[r.name]}: {r.error or f'exit code {r.code}'}", "red", "bold") + err(f"  (log: {r.log})", "dim"))
+            for line in _tail(r.log):
+                say("  " + err(line, "dim"))
+
+    if not any(r.report for r in ordered):
         shutil.rmtree(run_dir, ignore_errors=True)
-        log("Error: no module produced a report; the portal was not updated.")
+        say(err("Error: no module produced a report; the portal was not updated.", "red"))
         return EXIT_USAGE
 
     removed = prune_runs(out_dir, int(cfg.get("keep_runs", 12) or 0))
-    if removed:
-        log(f"Removed {len(removed)} old run(s) (keep_runs={cfg.get('keep_runs')})")
+    if removed and not quiet:
+        say(err(f"Removed {len(removed)} old run{'s' if len(removed) != 1 else ''} (keep_runs={cfg.get('keep_runs')})", "dim"))
     from . import portal
     reports, history = portal.collect(list_runs(out_dir))
     hub = os.path.join(out_dir, "security_hub.html")
     portal.build_hub(reports, hub, str(cfg.get("title") or ""), history)
     summary = portal.posture(reports, history)
-    summary["run"] = {"id": stamp, "folder": run_dir,
-                      "modules": [{"module": r.name, "exit_code": r.code, "seconds": round(r.seconds, 1),
-                                   "report": r.report, "error": r.error} for r in results]}
-    with open(os.path.join(out_dir, "posture.json"), "w", encoding="utf-8") as f:
+    summary["run"] = {"id": stamp, "folder": run_dir, "max_parallel": parallel,
+                      "modules": [{"module": r.name, "exit_code": r.code, "seconds": round(r.seconds, 1), "report": r.report,
+                                   "log": r.log, "timed_out": r.timed_out, "error": r.error} for r in ordered]}
+    posture_file = os.path.join(out_dir, "posture.json")
+    with open(posture_file, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, ensure_ascii=False)
 
     print_posture(summary)
-    print(f"\nPortal:  {hub}\nSummary: {os.path.join(out_dir, 'posture.json')}")
+    out = Style(sys.stdout)
+    print(f"\n{out('Portal ', 'bold')}  {out.link(hub)}\n{out('Summary', 'bold')}  {out.link(posture_file)}\n"
+          f"{out('Logs   ', 'bold')}  {out.link(run_dir)}")
 
-    if any(r.code == EXIT_INTERRUPTED for r in results):
+    if any(r.code == EXIT_INTERRUPTED for r in ordered):
         return EXIT_INTERRUPTED
-    if any(r.code not in (EXIT_OK, EXIT_FAIL_UNDER) or r.error for r in results):
+    if any(r.code not in (EXIT_OK, EXIT_FAIL_UNDER) or r.error for r in ordered):
         return EXIT_USAGE
-    if any(r.code == EXIT_FAIL_UNDER for r in results):
+    if any(r.code == EXIT_FAIL_UNDER for r in ordered):
         return EXIT_FAIL_UNDER
     if fail_under is not None and summary.get("overall_score") is not None and summary["overall_score"] < fail_under:
         return EXIT_FAIL_UNDER
     return EXIT_OK
-
-
-# ---------------------------------------------------------------------------
-# Console summary
-# ---------------------------------------------------------------------------
-
-STATUS_TEXT = {"good": "OK", "warn": "ATTENTION", "bad": "AT RISK", "unknown": "n/a", None: "n/a"}
-
-
-def print_posture(summary: dict, file=None) -> None:
-    out = file or sys.stdout
-    overall = summary.get("overall_score")
-    print(f"\n{'=' * 64}\nSECURITY POSTURE  {summary.get('overall_grade', '-')}"
-          f"{f'  ({overall}/100)' if overall is not None else ''}\n{'=' * 64}", file=out)
-    print(summary.get("summary", ""), file=out)
-    for a in summary.get("areas", []):
-        score = "" if a.get("score") is None else f"{a['score']:>3}"
-        print(f"  {a['label']:<24} {a.get('grade') or '-':>2} {score:>4}  {STATUS_TEXT.get(a.get('status'), a.get('status')):<10} "
-              f"{a.get('date', '')[:10]}  {a.get('headline') or ''}", file=out)
-        for k in a.get("kpis", []):
-            if k.get("value") is not None:
-                print(f"      - {k['label']}: {k['value']}{'%' if k.get('unit') == '%' else k.get('unit') or ''}", file=out)
-    acts = summary.get("actions", [])
-    if acts:
-        print("Top actions:", file=out)
-        for a in acts[:5]:
-            print(f"  [{a.get('severity', ''):<8}] {a.get('label', ''):<24} {a.get('title', '')}", file=out)
 
 
 def status(inputs: List[str], json_out: Optional[str] = None, as_json: bool = False) -> int:

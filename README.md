@@ -7,7 +7,7 @@ Monitoraggio della **security posture** su tre aree, con un unico comando e un u
 | **WAF** | `securityhub waf` (WAFGuard) | Configurazione Imperva Cloud WAF: onboarding, regole OWASP in blocco, eccezioni, allow-list, bot, DDoS, TLS, esposizione dell'origin | API Imperva (sola lettura) o snapshot JSON |
 | **DNS / E-mail** | `securityhub dns` (MailGuard DNS) | MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI, DNSSEC, takeover, lookalike, report DMARC aggregati | DNS live (+ RDAP, HTTPS per MTA-STS) |
 | **Zero Trust** | `securityhub zta` (ZTAGuard) | Risultati del Microsoft Zero Trust Assessment per pilastro, priorità, quick win | `ZeroTrustAssessmentReport.json` |
-| **Portale** | `securityhub portal` (GuardHub) | Un solo file HTML con stato per area, KPI, piano d'azione trasversale, trend storici e i report navigabili | Report HTML generati dai moduli |
+| **Portale** | `securityhub portal` (GuardHub) | Un solo file HTML con stato per area, KPI, piano d'azione trasversale, **vista per asset**, trend storici e i report navigabili | Report HTML generati dai moduli |
 
 Il comando **`securityhub run`** esegue tutti i moduli abilitati da un file di configurazione, confronta ogni
 modulo con l'esecuzione precedente, aggiorna il portale e scrive `posture.json`, un riepilogo machine-readable
@@ -38,27 +38,71 @@ Output di `securityhub run`:
 
 ```
 reports/
-  runs/2026-10-31T080000Z/   dns.html dns.json dns.csv  waf.html waf.json waf.csv  zta.html zta.json zta.csv
+  runs/2026-10-31T080000Z/   dns.html dns.json dns.csv dns.log  waf.* waf.log  zta.* zta.log
   runs/2026-11-07T080000Z/   ...
   security_hub.html          <- portale: ultima esecuzione navigabile, le precedenti diventano trend dei KPI
   posture.json               <- riepilogo per monitoraggio / SIEM / CI
 ```
 
-Esempio di output a console:
+Esempio di output a console (su un terminale l'avanzamento si aggiorna sul posto, con colori e link cliccabili;
+nei log di cron/CI è testo semplice, una riga per evento):
 
 ```
-================================================================
-SECURITY POSTURE  D  (52/100)
-================================================================
-2 need attention. Largest exposure: 2 of 3 websites (67%) are not effectively protected by the WAF.
-  Imperva Cloud WAF         D   50  ATTENTION  2026-10-31  2 of 3 websites (67%) are not effectively protected by the WAF
-      - Websites effectively protected by the WAF: 33%
-  Microsoft Zero Trust      D   54  ATTENTION  2026-10-01  1 high-risk Zero Trust controls are failing
-      - Zero Trust controls passed: 54/100
-Top actions:
-  [critical] Microsoft Zero Trust     Privileged accounts use phishing-resistant MFA
-  [critical] Imperva Cloud WAF        No WAF rules policy protects this website
+Security Hub run 2026-10-31T104144Z  ·  3 modules, up to 3 in parallel  ·  reports/runs/2026-10-31T104144Z
+  ✔ Microsoft Zero Trust (ZTAGuard)          done                 0s
+  ✔ Imperva Cloud WAF (WAFGuard)             done                 2s
+  ✔ DNS / e-mail security (MailGuard DNS)    done                41s
+
+SECURITY POSTURE   D   57/100
+────────────────────────────────────────────────────────────────────────
+1 of 3 areas at risk, 2 need attention. Largest exposure: 3 of 5 websites (60%) are not effectively protected by the WAF.
+
+  Email and DNS security      C  67  Attention  2026-10-31
+                             1 of 3 domains (33%) can be impersonated by email
+                             · Domains protected against spoofing: 67%
+  Imperva Cloud WAF           F  49  At risk    2026-10-31
+                             3 of 5 websites (60%) are not effectively protected by the WAF
+                             · Websites effectively protected by the WAF: 40%
+  Microsoft Zero Trust        D  54  Attention  2026-10-01
+                             1 high-risk Zero Trust controls are failing
+                             · Zero Trust controls passed: 54/100
+
+Assets  4 assets · 3 at risk · 1 coverage gap · 2 expiring
+  ✖ contoso.example              legacy.contoso.example: WAF in bypass, traffic is not inspected
+  ✖ fabrikam.example             www.fabrikam.example is not effectively protected by the WAF and fabrikam.example can be impersonated by e-mail (DMARC none)
+  ✖ northwind.example            portal.northwind.example: certificate expired 669 days ago
+
+Top actions
+  critical Email and DNS security   Policy p=none - monitoring only, no protection
+  critical Imperva Cloud WAF        Core WAF rule set to Ignore / disabled
+  critical Microsoft Zero Trust     Privileged accounts use phishing-resistant MFA
+
+Portal   reports/security_hub.html
+Summary  reports/posture.json
+Logs     reports/runs/2026-10-31T104144Z
 ```
+
+## Vista per asset
+
+Nel portale, **Assets** (tasto `a`) riunisce per dominio organizzativo tutto ciò che i report sanno di un asset:
+domini di posta (DMARC, SPF, MTA-STS, DNSSEC), siti protetti dal WAF (modalità, blocco attacchi, certificato),
+scadenze di certificati e registrazioni, tenant Microsoft collegato. I siti si agganciano al dominio più specifico
+presente nell'assessment DNS; quelli senza dominio corrispondente diventano un asset a sé.
+
+Per ogni asset vengono calcolati **segnali trasversali**, visibili solo incrociando le aree:
+
+| Segnale | Quando |
+|---|---|
+| Sito e posta esposti | il sito non è protetto efficacemente dal WAF **e** il dominio è impersonabile via e-mail (DMARC non in enforcement) |
+| WAF in bypass / origin esposto / attacchi non bloccati | per ogni sito dell'asset |
+| Takeover | una dipendenza DNS (include SPF, MX, NS, CNAME) è registrabile da terzi |
+| Dominio impersonabile | DMARC `none` o assente (critico per i domini di tier critical/high) |
+| Scadenze | certificato entro 30 giorni (critico entro 7) o scaduto; registrazione entro 60 giorni (critico entro 14) |
+| Lacuna di copertura | il dominio ospita siti protetti dal WAF ma non è nell'assessment DNS / e-mail |
+
+Filtri rapidi (a rischio, attenzione, lacune di copertura, in scadenza), ricerca, scheda di dettaglio con link diretti
+alle righe dei report, card "Assets needing attention" nella panoramica e ricerca globale (`Ctrl K`).
+Lo stesso inventario è in `posture.json` (`assets.summary`, `assets.items`).
 
 ## Configurazione
 
@@ -90,7 +134,15 @@ modules:
 - È accettato anche JSON (`securityhub run -c hub.json`), senza bisogno di PyYAML.
 
 Opzioni utili di `run`: `--only dns,zta`, `--dry-run` (mostra i comandi senza eseguirli), `-q` (solo la posture),
-`-o` (cartella di output alternativa).
+`-v` (mostra anche l'output dei moduli, con il prefisso `[dns]`, `[waf]`, `[zta]`), `-p N` (moduli in parallelo),
+`--timeout SECONDI`, `-o` (cartella di output alternativa).
+
+### Esecuzione parallela
+
+Ogni modulo gira **in un processo separato**: un errore o un blocco in un modulo non coinvolge gli altri. I moduli
+partono insieme (`max_parallel`, default: tutti; `1` = in sequenza) e l'output di ciascuno va in `runs/<data>/<modulo>.log`.
+Con `module_timeout` (o `timeout` per singolo modulo) un modulo che supera il tempo viene fermato e segnalato.
+Se un modulo fallisce, la console mostra le ultime righe del suo log.
 
 ## Monitoraggio continuo
 
@@ -144,16 +196,28 @@ I report prodotti sono identici a quelli degli script originali.
 ```
 securityhub/
   cli.py               entry point `securityhub`
-  orchestrator.py      run / status / init: config, esecuzioni datate, baseline automatica, retention, posture.json
+  orchestrator.py      run / status / init: config, esecuzione parallela con timeout e log, baseline, retention, posture.json
+  console.py           output del terminale: avanzamento, colori (NO_COLOR / FORCE_COLOR), riepilogo
   portal.py            GuardHub: portale unificato, metriche executive, storico KPI
+  inventory.py         vista per asset: correlazione DNS / WAF / certificati / tenant e segnali trasversali
   common.py            helper condivisi (export CSV sicuro, JSON in HTML, rate limiter, exit code, grade)
+  ui/                  design system condiviso di report e portale (assemblato in file HTML singoli e offline)
+    base.css             token, layout e componenti comuni a tutte le pagine
+    core.js, report-core.js, asset-report.js   funzioni condivise (tutte le pagine / i 3 report / DNS e WAF)
+    dns|waf|zta|portal.css|js, report.html, portal.html   parti specifiche
   scanners/
-    dns_email.py       MailGuard DNS
-    waf.py             WAFGuard (Imperva)
+    dns_email/         MailGuard DNS: constants, models, domains, dnsclient, rdap, fetch,
+                       analyzer + checks_auth / checks_transport / checks_exposure / scoring,
+                       lookalikes, dmarc_reports, remediation, baseline, inputs, exports, report, cli
+    waf/               WAFGuard: constants, models, api, probe, checks, scoring, remediation, analysis, exports, report, cli
     zero_trust.py      ZTAGuard (Microsoft)
-tests/                 test automatici (pytest) con fixture sintetiche
+tests/                 test automatici (pytest) con fixture sintetiche e DNS simulato (tests/fakedns.py)
 examples/              configurazione e lista domini di esempio
 ```
+
+Una modifica grafica fatta in `ui/base.css` o in un file JS condiviso arriva a tutti i report e al portale
+alla generazione successiva: i file in `ui/` contengono righe `/* @include nome */` che vengono sostituite dal
+contenuto del file indicato.
 
 ## Note di sicurezza
 

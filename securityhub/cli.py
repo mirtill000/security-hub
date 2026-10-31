@@ -45,12 +45,16 @@ def _usage() -> str:
 
 def _run_cmd(argv: List[str]) -> int:
     from . import orchestrator
-    p = Parser(prog="securityhub run", description="Run every enabled module, then rebuild the portal and posture.json")
+    p = Parser(prog="securityhub run", description="Run every enabled module (in parallel, each in its own process with a log), "
+                                                   "then rebuild the portal and posture.json")
     p.add_argument("-c", "--config", default=DEFAULT_CONFIG, help=f"Configuration file (default: {DEFAULT_CONFIG})")
     p.add_argument("--only", default="", help="Only these modules, comma-separated (dns,waf,zta)")
     p.add_argument("-o", "--output-dir", help="Override output_dir of the configuration")
     p.add_argument("--dry-run", action="store_true", help="Show the commands that would run, without running them")
-    p.add_argument("-q", "--quiet", action="store_true", help="Hide the module output, show only the posture")
+    p.add_argument("-q", "--quiet", action="store_true", help="No progress, only the posture (and why a module failed)")
+    p.add_argument("-v", "--verbose", action="store_true", help="Also stream the output of every module, prefixed by its name")
+    p.add_argument("-p", "--max-parallel", type=int, metavar="N", help="Modules run at the same time (default: all; 1 = one after the other)")
+    p.add_argument("--timeout", type=float, metavar="SECONDS", help="Stop a module that runs longer than this (default: module_timeout)")
     a = p.parse_args(argv)
     if not os.path.isfile(a.config):
         print(f"Error: configuration not found: {a.config} (create one with 'securityhub init')", file=sys.stderr)
@@ -58,7 +62,8 @@ def _run_cmd(argv: List[str]) -> int:
     only = [m.strip() for m in a.only.split(",") if m.strip()] or None
     try:
         return orchestrator.run(a.config, only=[ALIASES.get(m, m) for m in only] if only else None,
-                                dry_run=a.dry_run, quiet=a.quiet, output_dir=a.output_dir)
+                                dry_run=a.dry_run, quiet=a.quiet, output_dir=a.output_dir, verbose=a.verbose and not a.quiet,
+                                max_parallel=a.max_parallel, timeout=a.timeout)
     except (orchestrator.ConfigError, OSError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return EXIT_USAGE
