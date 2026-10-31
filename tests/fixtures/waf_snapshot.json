@@ -1,0 +1,156 @@
+{
+ "tool": "WAFGuard 1.1.0",
+ "collected": "2026-10-01T08:00:00+00:00",
+ "errors": [],
+ "accounts": [
+  {
+   "account_id": 1234567,
+   "name": "Contoso",
+   "plan": "Enterprise",
+   "parent": true,
+   "sites": [
+    {
+     "site_id": 1,
+     "domain": "www.contoso.example",
+     "display_name": "www.contoso.example",
+     "active": "active",
+     "status": "fully_configured",
+     "ssl": {
+      "custom_certificate": {
+       "active": true,
+       "expirationDate": 4102444800000
+      }
+     },
+     "dns": [
+      {
+       "dns_record_name": "www.contoso.example",
+       "set_type_to": "CNAME",
+       "set_data_to": [
+        "x.impervadns.net"
+       ]
+      }
+     ]
+    },
+    {
+     "site_id": 2,
+     "domain": "shop.contoso.example",
+     "display_name": "shop.contoso.example",
+     "active": "active",
+     "status": "fully_configured",
+     "ssl": {
+      "custom_certificate": {
+       "active": true,
+       "expirationDate": 4102444800000
+      }
+     },
+     "dns": [
+      {
+       "dns_record_name": "shop.contoso.example",
+       "set_type_to": "CNAME",
+       "set_data_to": [
+        "x.impervadns.net"
+       ]
+      }
+     ]
+    },
+    {
+     "site_id": 3,
+     "domain": "legacy.contoso.example",
+     "display_name": "legacy.contoso.example",
+     "active": "bypass",
+     "status": "fully_configured",
+     "ssl": {
+      "custom_certificate": {
+       "active": true,
+       "expirationDate": 4102444800000
+      }
+     },
+     "dns": [
+      {
+       "dns_record_name": "legacy.contoso.example",
+       "set_type_to": "CNAME",
+       "set_data_to": [
+        "x.impervadns.net"
+       ]
+      }
+     ]
+    }
+   ],
+   "policies": [
+    {
+     "id": 101,
+     "name": "Default WAF",
+     "policyType": "WAF_RULES",
+     "enabled": true,
+     "isMarkedAsDefault": true,
+     "policySettings": [
+      {
+       "policySettingType": "SQL_INJECTION",
+       "settingsAction": "BLOCK",
+       "policyDataExceptions": []
+      },
+      {
+       "policySettingType": "CROSS_SITE_SCRIPTING",
+       "settingsAction": "BLOCK",
+       "policyDataExceptions": []
+      },
+      {
+       "policySettingType": "REMOTE_FILE_INCLUSION",
+       "settingsAction": "BLOCK",
+       "policyDataExceptions": []
+      },
+      {
+       "policySettingType": "ILLEGAL_RESOURCE_ACCESS",
+       "settingsAction": "BLOCK",
+       "policyDataExceptions": []
+      }
+     ]
+    },
+    {
+     "id": 102,
+     "name": "Legacy app WAF",
+     "policyType": "WAF_RULES",
+     "enabled": true,
+     "isMarkedAsDefault": false,
+     "policySettings": [
+      {
+       "policySettingType": "SQL_INJECTION",
+       "settingsAction": "ALERT",
+       "policyDataExceptions": []
+      },
+      {
+       "policySettingType": "CROSS_SITE_SCRIPTING",
+       "settingsAction": "IGNORE",
+       "policyDataExceptions": []
+      },
+      {
+       "policySettingType": "REMOTE_FILE_INCLUSION",
+       "settingsAction": "BLOCK",
+       "policyDataExceptions": []
+      },
+      {
+       "policySettingType": "ILLEGAL_RESOURCE_ACCESS",
+       "settingsAction": "BLOCK",
+       "policyDataExceptions": []
+      }
+     ]
+    }
+   ],
+   "asset_policies": {
+    "1": [
+     {
+      "id": 101
+     }
+    ],
+    "2": [
+     {
+      "id": 102
+     }
+    ],
+    "3": []
+   },
+   "site_errors": {},
+   "traffic": {}
+  }
+ ]
+}

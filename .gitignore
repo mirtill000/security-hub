@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+
+# Assessment output: contains your security posture, keep it out of the repository
+reports/
+*_report.html
+security_hub.html
+posture.json
+snapshot*.json
+securityhub.yaml

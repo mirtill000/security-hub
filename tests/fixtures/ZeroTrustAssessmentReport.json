@@ -1,0 +1,105 @@
+{
+ "TenantName": "Contoso",
+ "TenantId": "00000000-0000-0000-0000-000000000001",
+ "Domain": "contoso.example",
+ "ExecutedAt": "2026-10-01T07:00:00Z",
+ "CurrentVersion": "1.0.0",
+ "Tests": [
+  {
+   "TestId": "21770",
+   "TestTitle": "Privileged accounts use phishing-resistant MFA",
+   "TestStatus": "Failed",
+   "TestRisk": "High",
+   "TestImpact": "Low",
+   "TestImplementationCost": "Low",
+   "TestPillar": "Identity",
+   "TestCategory": "Access control",
+   "TestDescription": "Synthetic test for the Security Hub test-suite.",
+   "TestResult": "Synthetic result."
+  },
+  {
+   "TestId": "21771",
+   "TestTitle": "Legacy authentication is blocked",
+   "TestStatus": "Passed",
+   "TestRisk": "High",
+   "TestImpact": "Low",
+   "TestImplementationCost": "Low",
+   "TestPillar": "Identity",
+   "TestCategory": "Access control",
+   "TestDescription": "Synthetic test for the Security Hub test-suite.",
+   "TestResult": "Synthetic result."
+  },
+  {
+   "TestId": "21772",
+   "TestTitle": "Users are protected by Conditional Access MFA",
+   "TestStatus": "Passed",
+   "TestRisk": "High",
+   "TestImpact": "Medium",
+   "TestImplementationCost": "Medium",
+   "TestPillar": "Identity",
+   "TestCategory": "Access control",
+   "TestDescription": "Synthetic test for the Security Hub test-suite.",
+   "TestResult": "Synthetic result."
+  },
+  {
+   "TestId": "24540",
+   "TestTitle": "Devices are compliant before accessing resources",
+   "TestStatus": "Investigate",
+   "TestRisk": "Medium",
+   "TestImpact": "Medium",
+   "TestImplementationCost": "Medium",
+   "TestPillar": "Devices",
+   "TestCategory": "Device management",
+   "TestDescription": "Synthetic test for the Security Hub test-suite.",
+   "TestResult": "Synthetic result."
+  },
+  {
+   "TestId": "24541",
+   "TestTitle": "BitLocker is enforced on Windows devices",
+   "TestStatus": "Failed",
+   "TestRisk": "Medium",
+   "TestImpact": "Low",
+   "TestImplementationCost": "Low",
+   "TestPillar": "Devices",
+   "TestCategory": "Device management",
+   "TestDescription": "Synthetic test for the Security Hub test-suite.",
+   "TestResult": "Synthetic result."
+  },
+  {
+   "TestId": "25100",
+   "TestTitle": "Global Secure Access is configured",
+   "TestStatus": "Skipped",
+   "TestRisk": "Medium",
+   "TestImpact": "Low",
+   "TestImplementationCost": "High",
+   "TestPillar": "Network",
+   "TestCategory": "Network access",
+   "TestDescription": "Synthetic test for the Security Hub test-suite.",
+   "TestResult": "Synthetic result."
+  },
+  {
+   "TestId": "26000",
+   "TestTitle": "Sensitivity labels are published",
+   "TestStatus": "Passed",
+   "TestRisk": "Low",
+   "TestImpact": "Low",
+   "TestImplementationCost": "Low",
+   "TestPillar": "Data",
+   "TestCategory": "Information protection",
+   "TestDescription": "Synthetic test for the Security Hub test-suite.",
+   "TestResult": "Synthetic result."
+  },
+  {
+   "TestId": "21800",
+   "TestTitle": "Guest access is restricted",
+   "TestStatus": "Failed",
+   "TestRisk": "Low",
+   "TestImpact": "Low",
+   "TestImplementationCost": "Medium",
+   "TestPillar": "Identity",
+   "TestCategory": "External identities",
+   "TestDescription": "Synthetic test for the Security Hub test-suite.",
+   "TestResult": "Synthetic result."
+  }
+ ]
+}

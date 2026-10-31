@@ -1,0 +1,39 @@
+# Security Hub - configuration for `securityhub run`
+# Relative paths are resolved from the folder of this file.
+
+title: "Contoso - Security posture"      # shown in the portal
+output_dir: reports                      # runs, portal and posture summary go here
+keep_runs: 12                            # older run folders are deleted (0 = keep all)
+# fail_under: 70                         # exit code 2 if an area / asset scores below this
+# auto_baseline: true                    # compare every module with its previous run
+
+modules:
+  # E-mail and DNS security of a domain portfolio (needs: pip install dnspython)
+  dns:
+    enabled: true
+    input: domains.csv                   # text (one domain per line) or CSV with tier/owner/bu/tags
+    options:
+      checks: all,takeover               # add lookalikes,consistency for deeper (slower) scans
+      csv: true
+      # dmarc_reports: [./rua]           # DMARC aggregate reports (.xml/.gz/.zip/.eml)
+      # nameservers: [1.1.1.1, 8.8.8.8]
+      # qps: 50
+
+  # Imperva Cloud WAF configuration (read-only API calls)
+  # Credentials: export IMPERVA_API_ID=... IMPERVA_API_KEY=...  (never in this file)
+  waf:
+    enabled: false
+    options:
+      account_id: 1234567
+      include_subaccounts: true
+      probe: true                        # DNS routing, TLS and origin exposure checks
+      csv: true
+      # metadata: sites.csv              # tier/owner/bu/tags/max_rps per website
+      # from_json: snapshot.json         # offline: analyze a saved snapshot instead of the API
+
+  # Microsoft Zero Trust Assessment (run Invoke-ZtAssessment first, then point to its folder)
+  zta:
+    enabled: false
+    input: ./ZeroTrustReport             # report folder, ZeroTrustAssessmentReport.json or HTML
+    options:
+      csv: true

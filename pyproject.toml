@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "securityhub"
+dynamic = ["version"]
+description = "Security posture monitoring for WAF (Imperva), DNS / e-mail and Microsoft Zero Trust, with one consolidated portal"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Proprietary" }
+dependencies = [
+    "dnspython>=2.3",
+]
+
+[project.optional-dependencies]
+# YAML configuration, IDNA 2008, hardened XML for DMARC reports, offline Public Suffix List fallback
+full = ["pyyaml>=6", "idna>=3", "defusedxml>=0.7", "tldextract>=3"]
+yaml = ["pyyaml>=6"]
+dev = ["pytest>=7", "pyflakes>=3"]
+
+[project.scripts]
+securityhub = "securityhub.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "securityhub.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["securityhub*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
