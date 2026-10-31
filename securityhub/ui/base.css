@@ -102,6 +102,9 @@ button { cursor: pointer; }
 .seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: var(--r); padding: 2px; background: var(--panel); }
 .seg button { border: 0; background: none; padding: 4px 10px; border-radius: 6px; color: var(--muted); }
 .seg button[aria-pressed="true"] { background: var(--raised); color: var(--text); box-shadow: 0 0 0 1px var(--line-2); }
+.theme-seg { display: flex; width: 100%; margin-top: 6px; }
+.theme-seg button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px; font-size: 12px; padding: 5px 6px; }
+.theme-seg button:hover { color: var(--text); }
 input[type="search"], input[type="number"], select { background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--r); padding: 6px 9px; min-width: 0; color: var(--text); }
 input[type="number"] { width: 76px; }
 input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; vertical-align: -2px; }
@@ -382,7 +385,9 @@ details.more > summary { cursor: pointer; color: var(--muted); font-size: 13px; 
 @media (max-width: 860px) {
   .app { grid-template-columns: 1fr; }
   .side { position: static; height: auto; flex-direction: row; align-items: center; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
-  .brand { padding: 10px 12px; } .brand small, .posture, .side-foot { display: none; }
+  .brand { padding: 10px 12px; } .brand small, .posture { display: none; }
+  .side-foot { margin: 0 0 0 auto; padding: 6px 10px 6px 4px; border-top: 0; display: flex; } .side-foot > .nav-item { display: none; }
+  .theme-seg { width: auto; margin: 0; } .theme-seg span { display: none; } .theme-seg button { padding: 5px 8px; }
   .nav { flex-direction: row; padding: 6px; }
   .nav-item { width: auto; white-space: nowrap; }
   .nav-item .count { display: none; }

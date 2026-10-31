@@ -144,6 +144,18 @@ partono insieme (`max_parallel`, default: tutti; `1` = in sequenza) e l'output d
 Con `module_timeout` (o `timeout` per singolo modulo) un modulo che supera il tempo viene fermato e segnalato.
 Se un modulo fallisce, la console mostra le ultime righe del suo log.
 
+## Tema chiaro / scuro
+
+Portale e report hanno tre modalità, scelte dal selettore in fondo alla barra laterale (su mobile: icone a fine barra)
+o dalla ricerca (`Ctrl K` → "Theme"):
+
+- **System**, il default: segue il tema del sistema operativo e si aggiorna se cambia mentre la pagina è aperta;
+- **Light** e **Dark**: fissi, indipendenti dal sistema.
+
+La scelta è una sola per il portale e per tutti i report, viene ricordata dal browser, si propaga alle altre
+schede aperte ed è applicata prima del primo rendering, senza flash. Nel portale i report incorporati seguono il
+tema del portale. La stampa e il PDF executive usano sempre la versione chiara.
+
 ## Monitoraggio continuo
 
 `securityhub run` è pensato per girare a intervalli regolari. Gli exit code sono uguali per tutti i comandi:
@@ -203,7 +215,7 @@ securityhub/
   common.py            helper condivisi (export CSV sicuro, JSON in HTML, rate limiter, exit code, grade)
   ui/                  design system condiviso di report e portale (assemblato in file HTML singoli e offline)
     base.css             token, layout e componenti comuni a tutte le pagine
-    core.js, report-core.js, asset-report.js   funzioni condivise (tutte le pagine / i 3 report / DNS e WAF)
+    core.js, theme.js, report-core.js, asset-report.js   funzioni condivise (tutte le pagine / i 3 report / DNS e WAF)
     dns|waf|zta|portal.css|js, report.html, portal.html   parti specifiche
   scanners/
     dns_email/         MailGuard DNS: constants, models, domains, dnsclient, rdap, fetch,

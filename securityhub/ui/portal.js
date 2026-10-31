@@ -11,22 +11,16 @@ const ICONS = {
   dns: '<path d="M3 5h18v14H3zM3 6l9 7 9-7"/>', waf: '<path d="M4 6h16M4 12h16M4 18h16M8 6v6M16 12v6M12 18v-6"/>', zta: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.2-3.6 4-5.5 7-5.5s5.8 1.9 7 5.5"/>',
   other: '<path d="M6 3h9l4 4v14H6zM14 3v5h5"/>', ext: '<path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/>', download: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',
   left: '<path d="m15 6-6 6 6 6"/>', sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
-  moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>', link: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3A4.5 4.5 0 0 0 13 4.6l-1 1M14 10a4.5 4.5 0 0 0-6.4 0l-3 3A4.5 4.5 0 0 0 11 19.4l1-1"/>',
+  moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>', monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>', link: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3A4.5 4.5 0 0 0 13 4.6l-1 1M14 10a4.5 4.5 0 0 0-6.4 0l-3 3A4.5 4.5 0 0 0 11 19.4l1-1"/>',
   trend: '<path d="M3 17l6-6 4 4 8-8M15 7h6v6"/>', search: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4-4"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>', assets: '<path d="M12 3 3 7.5l9 4.5 9-4.5L12 3z"/><path d="m3 12 9 4.5 9-4.5M3 16.5 12 21l9-4.5"/>', print: '<path d="M6 9V3h12v6M6 18H4v-7h16v7h-2M8 14h8v7H8z"/>'
 };
 const icon = (n, s) => `<svg class="ico" width="${s || 16}" height="${s || 16}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n] || ICONS.other}</svg>`;
 
-/* ---------- theme ---------- */
-let theme = null;
-try { theme = localStorage.getItem('guardhub-theme'); } catch (e) { /* storage unavailable */ }
-const isDark = () => { const t = document.documentElement.dataset.theme; return t ? t === 'dark' : !matchMedia('(prefers-color-scheme: light)').matches; };
-function applyTheme() { if (theme) document.documentElement.dataset.theme = theme; }
-function toggleTheme() {
-  theme = isDark() ? 'light' : 'dark';
-  try { localStorage.setItem('guardhub-theme', theme); } catch (e) { /* ignore */ }
-  applyTheme();
-  Object.values(frames).forEach(f => { try { f.el.contentWindow.postMessage({mgHubTheme: theme}, '*'); } catch (e) { /* ignore */ } });
+/* ---------- theme (shared logic in theme.js): the portal decides for the embedded reports ---------- */
+function onThemeChange() {
+  const t = isDark() ? 'dark' : 'light';
+  Object.values(frames).forEach(f => { try { f.el.contentWindow.postMessage({mgHubTheme: t}, '*'); } catch (e) { /* ignore */ } });
   render();
 }
 
@@ -264,7 +258,7 @@ function side() {
           <span class="hub-name"><span>${esc(r.label)}</span><small>${esc(r.subtitle || r.file)}</small></span><span class="hub-grade g-${esc(r.grade)}">${esc(r.grade)}</span></button>${on ? subNav(r) : ''}`; }).join('')}</nav>
     <div class="side-foot">${S.route === 'r' && frames[S.id] && frames[S.id].nav.some(x => x.action === 'keys') ? `<button class="nav-item" data-sub-action="keys">${icon('info')}<span>Report shortcuts</span></button>` : ''}
       <button class="nav-item" data-action="about">${icon('info')}<span>About this portal</span></button>
-      <button class="nav-item" data-action="theme">${icon(isDark() ? 'sun' : 'moon')}<span>${isDark() ? 'Light theme' : 'Dark theme'}</span></button></div>`;
+      ${themeControl()}</div>`;
 }
 const searchBtn = `<button class="cmdk" data-action="palette" aria-label="Search all reports">${icon('search')}<span class="lbl">Search all reports</span><span class="kbd">Ctrl K</span></button>`;
 function topbar() {
@@ -381,7 +375,7 @@ function paletteItems(q) {
     INDEX.filter(e => e.s.includes(q)).forEach(e => { const k = e.r.id + (e.kind || ''); per[k] = (per[k] || 0) + 1;
       if (per[k] <= (e.kind ? 4 : 6)) add(e.r.label + (e.kind ? ', findings' : ''), e.t, e.h, () => open(e.r.id, e.go)); });
   }
-  [['Toggle light or dark theme', toggleTheme], ['Print this page', () => window.print()]].forEach(([t, fn]) => { if (!q || t.toLowerCase().includes(q)) add('Actions', t, '', fn); });
+  [...themeActions(), ['Print this page', () => window.print()]].forEach(([t, fn]) => { if (!q || t.toLowerCase().includes(q)) add('Actions', t, '', fn); });
   return out;
 }
 function openPalette() {

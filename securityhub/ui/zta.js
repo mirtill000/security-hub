@@ -30,7 +30,7 @@ const ICONS = {
   layers: '<path d="m12 3 9 5-9 5-9-5 9-5zM3 13l9 5 9-5"/>', diff: '<path d="M7 4v16M3.5 7.5 7 4l3.5 3.5M17 20V4M13.5 16.5 17 20l3.5-3.5"/>',
   building: '<path d="M4 21V4h11v17M15 9h5v12M8 8h3M8 12h3M8 16h3"/>', search: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4-4"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
-  moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>', left: '<path d="m15 6-6 6 6 6"/>', right: '<path d="m9 6 6 6-6 6"/>',
+  moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>', monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>', left: '<path d="m15 6-6 6 6 6"/>', right: '<path d="m9 6 6 6-6 6"/>',
   link: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3A4.5 4.5 0 0 0 13 4.6l-1 1M14 10a4.5 4.5 0 0 0-6.4 0l-3 3A4.5 4.5 0 0 0 11 19.4l1-1"/>',
   print: '<path d="M6 9V3h12v6M6 18H4v-7h16v7h-2M8 14h8v7H8z"/>', download: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>', filter: '<path d="M3 5h18l-7 8.5V19l-4 2v-7.5L3 5z"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>', key: '<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>',
@@ -87,7 +87,7 @@ function md(src) {
 
 /* ================= preferences & state ================= */
 const PREF_KEY = 'ztaguard-prefs-v1';
-const P = {density: 'comfortable', size: 50, theme: null, group: 'none'};
+const P = {density: 'comfortable', size: 50, group: 'none'};
 try { Object.assign(P, JSON.parse(localStorage.getItem(PREF_KEY) || '{}')); } catch (e) { /* storage unavailable */ }
 const savePrefs = () => { try { localStorage.setItem(PREF_KEY, JSON.stringify(P)); } catch (e) { /* ignore */ } };
 const FKEYS = ['q', 'status', 'pillar', 'risk', 'impact', 'cost', 'category', 'sfi', 'license', 'tag', 'changed', 'quick'];
@@ -153,7 +153,6 @@ const CHIP_LABEL = {q: v => `Search "${v}"`, status: v => 'Status: ' + v.split('
   license: v => `License ${v}`, tag: v => `#${v}`, changed: v => v === '1' ? 'Changed since baseline' : `Change: ${v}`, quick: () => 'Quick wins'};
 
 /* ================= frame ================= */
-const isDark = () => { const t = document.documentElement.dataset.theme; return t ? t === 'dark' : !matchMedia('(prefers-color-scheme: light)').matches; };
 function side() {
   const sc = D.score, g = gradeOf(sc);
   return `<div class="brand"><div class="brand-mark">${icon('shield', 18)}</div><div><b>ZTAGuard</b><small>Zero Trust posture</small></div></div>
@@ -165,7 +164,7 @@ function side() {
     <div class="side-foot">
       <button class="nav-item" data-action="about">${icon('info')}<span>About this report</span></button>
       <button class="nav-item" data-action="keys">${icon('key')}<span>Keyboard shortcuts</span><span class="count"><span class="kbd">?</span></span></button>
-      <button class="nav-item" data-action="theme">${icon(isDark() ? 'sun' : 'moon')}<span>${isDark() ? 'Light theme' : 'Dark theme'}</span></button></div>`;
+      ${themeControl()}</div>`;
 }
 function topbar() {
   const r = ROUTES.find(x => x.id === S.route) || ROUTES[0];
@@ -537,7 +536,7 @@ function paletteItems(q) {
   (q ? T.filter(t => t._text.includes(q)) : T.filter(t => t.priority > 0).sort((a, b) => b.priority - a.priority)).slice(0, q ? 10 : 5)
     .forEach(t => items.push({g: 'Tests', t: t.title, h: st(t.status)[2], run: () => go({open: t._i, dtab: 'result'})}));
   if (q) uniq(T.map(t => t.category)).filter(c => c.toLowerCase().includes(q)).slice(0, 5).forEach(c => items.push({g: 'Categories', t: c, h: '', run: () => filterTo({category: c})}));
-  [['Toggle light or dark theme', toggleTheme], ['Executive summary as PDF', printExec], ['Export filtered tests as CSV', () => exportCsv(list())], ['Clear all filters', () => filterTo({})], ['Keyboard shortcuts', showKeys]]
+  [...themeActions(), ['Executive summary as PDF', printExec], ['Export filtered tests as CSV', () => exportCsv(list())], ['Clear all filters', () => filterTo({})], ['Keyboard shortcuts', showKeys]]
     .forEach(([t, fn]) => { if (!q || t.toLowerCase().includes(q)) items.push({g: 'Actions', t, h: '', run: fn}); });
   return items;
 }

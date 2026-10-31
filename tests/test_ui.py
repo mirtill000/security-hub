@@ -32,6 +32,18 @@ class UiAssetsTest(unittest.TestCase):
             own = resources.files("securityhub.ui").joinpath(f"{page}.js").read_text(encoding="utf-8")
             self.assertFalse(shared & set(re.findall(r"^(?:function |const )(\\w+)", own, re.M)), page)
 
+    def test_theme_is_shared_by_every_page(self):
+        theme = ui.asset("theme.js")
+        for page in self.PAGES:
+            js = ui.asset(f"{page}.js")
+            self.assertIn(theme, js, page)
+            self.assertIn("themeControl()", js, page)          # System / Light / Dark selector
+            self.assertIn("...themeActions()", js, page)       # theme commands in the search palette
+            self.assertEqual(js.count("const isDark"), 1, page)  # one implementation only
+        for tpl in ("report.html", "portal.html"):
+            head = ui.asset(tpl).split("<style>")[0]
+            self.assertIn("securityhub-theme", head, tpl)       # applied before the first paint
+
     def test_include_loop_is_detected(self):
         with self.assertRaises(ValueError):
             ui.asset("x", _depth=9)
