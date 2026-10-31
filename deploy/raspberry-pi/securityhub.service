@@ -16,7 +16,13 @@ ExecStart=/opt/securityhub/venv/bin/securityhub run -q -c /opt/securityhub/confi
 # 2 = a score below fail_under: an assessment result, not a service failure
 SuccessExitStatus=2
 TimeoutStartSec=4h
-Nice=10
+# low priority: the scan uses spare CPU and disk only, SSH and other services stay responsive
+Nice=15
+CPUWeight=20
+IOSchedulingClass=idle
+# on a Pi 3 / with other services: cap the CPU (100% = one core) and the memory
+# CPUQuota=150%
+MemoryHigh=600M
 # hardening: read-only system, writable only where the tool writes
 NoNewPrivileges=yes
 ProtectSystem=strict

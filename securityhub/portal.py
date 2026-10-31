@@ -403,7 +403,7 @@ def subject_of(kind: str, payload: Optional[dict]) -> str:
     return ""
 
 
-def load_report(path: str, idx: int) -> dict:
+def _read_report(path: str) -> Tuple[str, Optional[dict]]:
     with open(path, "r", encoding="utf-8", errors="replace") as f:
         text = f.read()
     m = DATA_RE.search(text)
@@ -413,6 +413,13 @@ def load_report(path: str, idx: int) -> dict:
             payload = json.loads(m.group(1))
         except ValueError:
             payload = None
+    return text, payload
+
+
+def load_report(path: str, idx: int, keep: bool = True) -> dict:
+    """Metadata, summary and executive metrics of a report; with keep=False the page and its parsed data are
+    dropped right away (history runs only feed the KPI trends: keeping them would cost hundreds of MB)."""
+    text, payload = _read_report(path)
     tm = TITLE_RE.search(text)
     title = html.unescape(tm.group(1).strip()) if tm else os.path.basename(path)
     kind = detect(payload, title)
@@ -433,7 +440,8 @@ def load_report(path: str, idx: int) -> dict:
     when = parse_date(summary.get("generated", "")) or datetime.fromtimestamp(os.path.getmtime(path), timezone.utc)
     return {"id": f"r{idx}", "type": kind, "label": TYPE_LABEL[kind], "title": title, "file": os.path.basename(path),
             "date": when.strftime("%Y-%m-%dT%H:%M:%SZ"), "subject": subject_of(kind, payload),
-            "size": len(text.encode("utf-8")), "grade": grade(summary["score"]), **summary, "html": text, "payload": payload}
+            "size": len(text.encode("utf-8")), "grade": grade(summary["score"]), **summary, "path": path,
+            **({"html": text, "payload": payload} if keep else {})}
 
 
 def find_reports(inputs: List[str], include_all: bool) -> List[str]:
@@ -530,7 +538,7 @@ def build_hub(reports: List[dict], out: str, title: str, history: Optional[dict]
             "max_age_days": {**MAX_AGE_DAYS, **(max_age or {})},
             "portfolio": portfolio(reports), "history": history or {"series": [], "runs": []},
             "inventory": inventory.build(reports)}
-    index = [{k: v for k, v in r.items() if k not in ("html", "payload")} for r in reports]
+    index = [{k: v for k, v in r.items() if k not in ("html", "payload", "path")} for r in reports]
     blocks = "\n".join(f'<script type="application/json" id="rep-{r["id"]}">{_json_for_html(r["html"])}</script>' for r in reports)
     page = (HUB_TEMPLATE.replace("__TITLE__", html.escape(title or "GuardHub")).replace("__CSS__", HUB_CSS).replace("__JS__", HUB_JS)
             .replace("__DATA__", _json_for_html({"meta": meta, "reports": index}))
@@ -557,8 +565,10 @@ def collect(inputs: List[str], include_all: bool = False, exclude: Optional[List
     files = find_reports(inputs, include_all)
     skip = {os.path.realpath(x) for x in exclude or []}
     files = [f for f in files if os.path.realpath(f) not in skip]
-    loaded = [load_report(f, i) for i, f in enumerate(files)]
+    loaded = [load_report(f, i, keep=False) for i, f in enumerate(files)]  # one report in memory at a time
     reports, history = split_history(loaded)
+    for r in reports:  # only the latest run of each tool is embedded and correlated: load its page again
+        r["html"], r["payload"] = _read_report(r["path"])
     reports.sort(key=lambda r: (TYPE_ORDER[r["type"]], r["title"]))
     return reports, history
 

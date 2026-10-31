@@ -404,7 +404,8 @@ function tabEvidence(r) {
   if (vis(r, 'dkim')) h += sec('dkim', 'DKIM', r.dkim.selectors.length ? `<table><thead><tr><th>Selector</th><th>Key</th><th>Status</th></tr></thead><tbody>
       ${r.dkim.selectors.map(s => `<tr><td class="mono">${esc(s.name)}${s.source === 'report' ? ' <span class="tag">from reports</span>' : ''}${s.cname ? `<div class="sub">CNAME ${esc(s.cname)}</div>` : ''}</td>
         <td class="nowrap">${esc(s.algorithm || '')} ${s.key_size ? s.key_size + ' bit' : ''}${s.testing ? ' <span class="tag">t=y</span>' : ''}${s.hash_algorithms ? ` <span class="tag">h=${esc(s.hash_algorithms)}</span>` : ''}</td>
-        <td>${pill({valid: 'valid', weak: 'warning', revoked: 'missing', invalid: 'error'}[s.status] || 'missing', s.status)}</td></tr>`).join('')}</tbody></table>`
+        <td>${pill({valid: 'valid', weak: 'warning', revoked: 'missing', invalid: 'error'}[s.status] || 'missing', s.status)}</td></tr>`).join('')}</tbody></table>
+      ${r.dkim.stopped_early ? `<p class="sub" style="margin-top:8px">Search stopped after ${r.dkim.probed} selectors: a valid key was found. Run with --full-dkim to probe every known selector.</p>` : ''}`
     : `<p class="muted">${r.dkim.status === 'na' ? 'Not needed: the domain does not handle mail.' : `No key found on ${r.dkim.probed} probed selectors. Add custom selectors with --selectors or load DMARC reports to discover them.`}</p>`, pill(r._st('dkim')));
   if (vis(r, 'dmarc')) h += sec('dmarc', 'DMARC', `${r.dmarc.record ? `<pre class="record">${esc(r.dmarc.record)}</pre>` : '<p class="muted" style="margin-bottom:10px">No DMARC record.</p>'}
       ${r.dmarc.inherited_from ? `<p class="sub" style="margin-bottom:10px">Inherited from ${esc(r.dmarc.inherited_from)}</p>` : ''}

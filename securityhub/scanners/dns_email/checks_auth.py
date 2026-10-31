@@ -8,9 +8,9 @@ import ipaddress
 import re
 import threading
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
-from .constants import DMARC_RE, SPF_MECHANISMS, SPF_RE, SPF_TERM_RE
+from .constants import DKIM_FIRST_ROUND, DKIM_PROVIDER_SELECTORS, DMARC_RE, SPF_MECHANISMS, SPF_RE, SPF_TERM_RE
 from .domains import org_domain
 from .models import DKIMResult, DKIMSelector, DMARCResult, MXRecord, MXResult, SPFResult, make_issue
 from .util import issues_from_problems, match_provider, parse_tags, rsa_key_bits
@@ -345,7 +345,7 @@ class AuthChecks:
             return sel, False, None
         return None, False, None
 
-    def _analyze_dkim(self, domain: str, mail_enabled: bool = True) -> DKIMResult:
+    def _analyze_dkim(self, domain: str, mail_enabled: bool = True, providers: Sequence[str] = ()) -> DKIMResult:
         result = DKIMResult()
 
         if self.fast_dkim:
@@ -357,7 +357,7 @@ class AuthChecks:
                     result.issues.append(make_issue("DKIM_NOT_FOUND", "_domainkey does not exist"))
                 return result
 
-        # All selectors are probed in parallel on the shared pool. Circuit breaker: once
+        # Selectors are probed in parallel on the shared pool. Circuit breaker: once
         # DKIM_MAX_ERRORS probes of this domain fail (zone not answering), the probes
         # still queued are skipped instead of each waiting for the full timeout.
         state = {"errors": 0, "skipped": 0}
@@ -370,19 +370,38 @@ class AuthChecks:
                     return None, False, None
             return self._probe_selector(domain, selector)
 
+        def run(batch: List[str]) -> None:
+            for fut in [self._pool.submit(probe, s) for s in batch]:
+                sel, err, dangling = fut.result()
+                if err:
+                    with state_lock:
+                        state["errors"] += 1
+                if sel:
+                    if sel.name in from_reports:
+                        sel.source = "report"
+                    result.selectors.append(sel)
+                if dangling:
+                    result.dangling.append(dangling)
+
         from_reports = self.report_selectors.get(domain, [])
         selectors = list(dict.fromkeys(from_reports + self.selectors))
-        for fut in [self._pool.submit(probe, s) for s in selectors]:
-            sel, err, dangling = fut.result()
-            if err:
-                with state_lock:
-                    state["errors"] += 1
-            if sel:
-                if sel.name in from_reports:
-                    sel.source = "report"
-                result.selectors.append(sel)
-            if dangling:
-                result.dangling.append(dangling)
+        if self.full_dkim:
+            first, rest = selectors, []
+        else:
+            hinted = [x for p in providers for k, v in DKIM_PROVIDER_SELECTORS.items() if k in p.lower() for x in v]
+            first = list(dict.fromkeys(from_reports + self.extra_selectors + hinted + DKIM_FIRST_ROUND))
+            first = [x for x in first if x in selectors]
+            rest = [x for x in selectors if x not in first]
+        run(first)
+        found = any(x.status in ("valid", "weak") for x in result.selectors)
+        # Parked domains (no mail) need no DKIM: the first round only looks for dangling selector CNAMEs.
+        if rest and mail_enabled and not found:
+            if state["errors"] < self.DKIM_MAX_ERRORS:
+                run(rest)
+            else:  # the zone does not answer: the second round counts as skipped (status dns_error, not missing)
+                state["skipped"] += len(rest)
+        result.stopped_early = bool(rest) and (found or not mail_enabled)
+        selectors = first + (rest if not result.stopped_early else [])
         dns_errors = state["errors"]
         aborted = state["skipped"] > 0
         probed = len(selectors) - state["skipped"]

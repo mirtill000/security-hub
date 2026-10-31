@@ -124,10 +124,14 @@ Exit codes: 0 ok, 1 usage/input/resolver error, 2 a domain scored below --fail-u
                         help="Comma-separated resolvers (default: 1.1.1.1,8.8.8.8,9.9.9.9)")
     parser.add_argument("--system-resolver", action="store_true", help="Use the OS resolver configuration")
     parser.add_argument("--qps", type=float, default=0, help="Max DNS queries per second (0 = unlimited)")
+    parser.add_argument("--max-inflight", type=int, default=32,
+                        help="Max DNS queries in flight at the same time (default: 32; 0 = no cap)")
     parser.add_argument("--skip-preflight", action="store_true", help="Do not test the resolver before scanning")
     parser.add_argument("--selectors", default="", help="Extra DKIM selectors, comma-separated")
     parser.add_argument("--selectors-file", help="File with extra DKIM selectors (one per line)")
     parser.add_argument("--only-selectors", action="store_true", help="Probe only the selectors you provide")
+    parser.add_argument("--full-dkim", action="store_true",
+                        help="Probe every DKIM selector even after a valid key is found (complete audit, ~5x slower)")
     parser.add_argument("--fast-dkim", action="store_true",
                         help="Skip selector probing when _domainkey is NXDOMAIN (RFC 8020; faster on large portfolios)")
     parser.add_argument("--no-http", action="store_true", help="Do not fetch MTA-STS policies over HTTPS")
@@ -212,7 +216,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     nameservers = [n.strip() for n in args.nameservers.split(",") if n.strip()]
     workers = max(1, args.workers)
 
-    client = DNSClient(nameservers, args.timeout, args.system_resolver, args.qps)
+    client = DNSClient(nameservers, args.timeout, args.system_resolver, args.qps, args.max_inflight)
     notes: List[str] = [psl_note]
     if not args.skip_preflight:
         ok, message = preflight(client)
@@ -254,11 +258,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     t0 = time.monotonic()
     results: List[DomainResult] = []
     interrupted = False
-    analyzer = EmailSecurityAnalyzer(timeout=args.timeout, selectors=selectors, fast_dkim=args.fast_dkim,
+    analyzer = EmailSecurityAnalyzer(timeout=args.timeout, selectors=selectors, fast_dkim=args.fast_dkim, full_dkim=args.full_dkim,
                                      http_checks=not args.no_http, dkim_threads=min(64, workers * 4),
                                      checks=checks, dns_client=client, rdap=rdap, allow_private=args.allow_private,
                                      report_data=report_data, known_domains=[i.domain for i in inputs],
                                      lookalike_limit=args.lookalike_limit, lookalike_tiers=lookalike_tiers)
+    analyzer.extra_selectors = extra
     progress = Progress(len(inputs), args.quiet)
     executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="domain")
     try:

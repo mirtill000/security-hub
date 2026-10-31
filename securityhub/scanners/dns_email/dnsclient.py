@@ -31,7 +31,7 @@ class DNSClient:
     ERROR_TTL = 60.0
 
     def __init__(self, nameservers: Optional[List[str]] = None, timeout: float = 5.0,
-                 use_system: bool = False, qps: float = 0):
+                 use_system: bool = False, qps: float = 0, max_inflight: int = 0):
         self.timeout = timeout
         self.resolver = self._make_resolver(nameservers, use_system, timeout, cd=False)
         self.resolver_cd = self._make_resolver(nameservers, use_system, timeout, cd=True)
@@ -42,6 +42,8 @@ class DNSClient:
         self._bogus: Set[str] = set()
         self._lock = threading.Lock()
         self._rate = RateLimiter(qps) if qps and qps > 0 else None
+        # at most this many queries on the wire at once (0 = no cap): protects small routers / NAT tables
+        self._slots = threading.BoundedSemaphore(max_inflight) if max_inflight and max_inflight > 0 else None
         self.stats = Counter()
 
     @staticmethod
@@ -115,6 +117,12 @@ class DNSClient:
         return ans
 
     def _resolve(self, name: str, rdtype: str, resolver) -> DNSAnswer:
+        if self._slots:
+            with self._slots:
+                return self._resolve_now(name, rdtype, resolver)
+        return self._resolve_now(name, rdtype, resolver)
+
+    def _resolve_now(self, name: str, rdtype: str, resolver) -> DNSAnswer:
         if self._rate:
             self._rate.wait()
         try:

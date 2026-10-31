@@ -33,7 +33,7 @@ class EmailSecurityAnalyzer(AuthChecks, TransportChecks, DNSHygieneChecks, Expos
 
     def __init__(self, timeout: float = 5.0, nameservers: Optional[List[str]] = None,
                  use_system_resolver: bool = False, selectors: Optional[List[str]] = None,
-                 fast_dkim: bool = False, http_checks: bool = True, dkim_threads: int = 32,
+                 fast_dkim: bool = False, http_checks: bool = True, dkim_threads: int = 32, full_dkim: bool = False,
                  checks: Optional[List[str]] = None, dns_client: Optional[DNSClient] = None,
                  rdap: Optional[RDAPClient] = None, allow_private: bool = False,
                  report_data: Optional[Dict[str, dict]] = None, known_domains: Iterable[str] = (),
@@ -50,6 +50,8 @@ class EmailSecurityAnalyzer(AuthChecks, TransportChecks, DNSHygieneChecks, Expos
                                            use_system_resolver, qps)
         self.selectors = list(dict.fromkeys(selectors or self.COMMON_DKIM_SELECTORS))
         self.fast_dkim = fast_dkim
+        self.full_dkim = full_dkim
+        self.extra_selectors: List[str] = []  # given by the user: always probed in the first round
         self.http_checks = http_checks
         self.allow_private = allow_private
         self.rdap = rdap
@@ -208,7 +210,7 @@ class EmailSecurityAnalyzer(AuthChecks, TransportChecks, DNSHygieneChecks, Expos
         if "axfr" in run:
             submit("axfr", self._analyze_axfr, domain)
         if "dkim" in run:
-            result.dkim = timed("dkim", self._analyze_dkim, domain, mail_enabled)
+            result.dkim = timed("dkim", self._analyze_dkim, domain, mail_enabled, result.mx.providers)
         for check, fut in pending.items():
             setattr(result, CHECK_ATTRS[check], fut.result())
         if "bimi" in run:

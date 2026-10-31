@@ -80,6 +80,7 @@ class DKIMResult:
     total_selectors: int = 0
     weak_keys: int = 0
     probed: int = 0
+    stopped_early: bool = False  # a valid key was found in the first round (or the domain sends no mail)
     dangling: List[dict] = field(default_factory=list)  # {"name", "target"}
     issues: List[Issue] = field(default_factory=list)
 

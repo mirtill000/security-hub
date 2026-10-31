@@ -37,6 +37,8 @@ defusedxml (extra XML hardening), tldextract (offline PSL fallback).
 from __future__ import annotations
 
 from .constants import (
+    DKIM_FIRST_ROUND,
+    DKIM_PROVIDER_SELECTORS,
     CHECKS,
     CHECK_ALIASES,
     CHECK_ATTRS,
@@ -175,6 +177,8 @@ from .cli import (
 )
 
 __all__ = [
+    'DKIM_FIRST_ROUND',
+    'DKIM_PROVIDER_SELECTORS',
     'AXFRResult',
     'CAAResult',
     'DNSHygieneChecks',

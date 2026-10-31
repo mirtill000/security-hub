@@ -176,6 +176,19 @@ La scelta è una sola per il portale e per tutti i report, viene ricordata dal b
 schede aperte ed è applicata prima del primo rendering, senza flash. Nel portale i report incorporati seguono il
 tema del portale. La stampa e il PDF executive usano sempre la versione chiara.
 
+## Prestazioni e dispositivi piccoli (Raspberry Pi)
+
+- **DKIM a due giri** (default): prima i selettori del provider di posta rilevato, quelli da report DMARC o
+  `--selectors` e i più diffusi; se c'è una chiave valida la ricerca si ferma, altrimenti si provano tutti i
+  selettori noti (quindi "DKIM non trovato" resta affidabile). Sui domini senza posta si cerca solo il primo giro
+  (CNAME orfani). Su 900 domini: −56% di query DNS, stessi risultati. `full_dkim: true` per l'audit completo.
+- **Query contemporanee limitate** (`max_inflight`, default 32) e limite al secondo opzionale (`qps`): il traffico
+  resta gestibile anche per router domestici e tabelle NAT piccole.
+- **Storico leggero**: per i trend il portale usa solo i KPI delle esecuzioni precedenti, i report completi sono caricati
+  solo per l'ultima. Con 30 esecuzioni da 900 domini: picco di memoria da 722 MB a 65 MB.
+- **Servizio a bassa priorità** (`deploy/raspberry-pi/securityhub.service`): `Nice`, `CPUWeight`, I/O `idle` e
+  `MemoryHigh`, così SSH e gli altri servizi restano reattivi durante la scansione.
+
 ## Pubblicazione su un web server
 
 Con `publish` nella configurazione, al termine di ogni `run` il portale viene copiato come `index.html` nella cartella

@@ -320,6 +320,16 @@ DEFAULT_DKIM_SELECTORS = [
     "fm1", "fm2", "fm3", "mxvault",
 ]
 
+# DKIM is probed in two rounds. Round 1: selectors of the mail provider seen in MX, selectors from
+# DMARC reports or --selectors, and the most common ones. Only if round 1 finds no valid key are the
+# other selectors probed, so "DKIM not found" still means every known selector was tried.
+DKIM_FIRST_ROUND = ["selector1", "selector2", "google", "default", "dkim", "s1", "s2", "k1", "mail", "key1"]
+DKIM_PROVIDER_SELECTORS = {  # substring of the MX provider name -> its selectors
+    "microsoft": ["selector1", "selector2"], "google": ["google"], "zoho": ["zoho", "zmail"],
+    "proton": ["protonmail", "protonmail2", "protonmail3"], "fastmail": ["fm1", "fm2", "fm3"],
+    "mailgun": ["mailgun", "mg", "pic", "krs"], "sendgrid": ["s1", "s2", "smtpapi"], "amazon": ["amazonses"],
+}
+
 
 # suffix -> provider (matched on label boundaries, most specific first)
 PROTECTED_MX_PROVIDERS: Dict[str, str] = {

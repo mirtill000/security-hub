@@ -79,7 +79,9 @@ modules:
       csv: true
       # dmarc_reports: [./rua]           # DMARC aggregate reports (.xml/.gz/.zip/.eml)
       # nameservers: [1.1.1.1, 8.8.8.8]
-      # qps: 50
+      # qps: 50                         # max DNS queries per second (default: unlimited)
+      # max_inflight: 32               # max DNS queries on the wire at once (default 32: router friendly)
+      # full_dkim: true                # probe every DKIM selector (complete audit, slower; e.g. once a month)
 
   # Imperva Cloud WAF configuration (read-only API calls)
   # Credentials: export IMPERVA_API_ID=... IMPERVA_API_KEY=...  (never in this file)
