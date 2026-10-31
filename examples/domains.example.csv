@@ -1,3 +1,5 @@
-domain;tier;owner;bu;tags
-contoso.example;critical;it-sec;corp;brand
-mail.contoso.example;high;it;corp;
+# Elenco dei domini: basta un dominio per riga.
+# Facoltativo, per posizione: dominio;tier;owner;bu;tag1|tag2
+contoso.example
+fabrikam.example;high;marketing;retail
+contoso-old.example;low;;;parked

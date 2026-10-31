@@ -131,6 +131,11 @@ modules:
     input: ./ZeroTrustReport
 ```
 
+- **Elenco dei domini** (`modules.dns.input`): basta una lista semplice, un dominio per riga (anche più domini per
+  riga separati da virgola o spazio; `#` per i commenti), qualunque sia l'estensione del file. Le informazioni
+  aggiuntive sono facoltative: CSV con intestazione (`domain`/`dominio` più, in qualsiasi ordine, `tier`, `owner`,
+  `bu`, `tags`) oppure senza intestazione, per posizione: `dominio;tier;owner;bu;tag1|tag2`, lasciando vuoti i campi
+  che non servono. Il tier (`critical`, `high`, `medium`, `low`; default `medium`) pesa sulle priorità.
 - `options` accetta **le stesse opzioni della riga di comando** del modulo (`securityhub <modulo> --help`),
   con `_` o `-`: `true/false` per gli switch, liste per valori multipli. Le opzioni sconosciute sono un errore.
 - I percorsi relativi sono risolti rispetto alla cartella del file di configurazione.

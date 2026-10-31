@@ -71,7 +71,7 @@ modules:
   dns:
     enabled: true
     # timeout: 7200                      # large portfolios with lookalikes can take long
-    input: domains.csv                   # text (one domain per line) or CSV with tier/owner/bu/tags
+    input: domains.csv                   # a plain list of domains is enough; tier/owner/bu/tags columns are optional
     options:
       checks: all,takeover               # add axfr (active zone transfer test), lookalikes, consistency
       csv: true

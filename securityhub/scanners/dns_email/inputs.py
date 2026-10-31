@@ -29,52 +29,75 @@ def _read_input(path: str) -> str:
         return f.read()
 
 
+POSITIONAL = ("domain", "tier", "owner", "bu", "tags")
+FIELD_SPLIT = re.compile(r"\s*[;,\t]\s*")
+
+
+def _header_map(fields: List[str]) -> Dict[str, int]:
+    """Column index of each known field when `fields` is a header row (needs a domain column)."""
+    colmap: Dict[str, int] = {}
+    for idx, col in enumerate(fields):
+        key = col.strip().strip('"').strip().lower()
+        for target, aliases in CSV_COLUMNS.items():
+            if key in aliases and target not in colmap:
+                colmap[target] = idx
+    return colmap if "domain" in colmap else {}
+
+
+def _domain_input(d: str, row: Dict[str, str]) -> DomainInput:
+    tier_raw = (row.get("tier") or "").strip().lower()
+    tags = [t.strip() for t in re.split(r"[|,;]", row.get("tags") or "") if t.strip()]
+    return DomainInput(domain=d, tier=TIER_ALIASES.get(tier_raw, "medium"), owner=(row.get("owner") or "").strip(),
+                       bu=(row.get("bu") or "").strip(), tags=tags)
+
+
 def load_domains(path: str) -> Tuple[List[DomainInput], List[str]]:
+    """Domains to assess, from any of these forms (the extension does not matter):
+
+    - a plain list: one domain per line, or several per line separated by commas, semicolons or spaces;
+    - a CSV with a header: columns recognized by name (domain/dominio, tier, owner, bu, tags), only domain required;
+    - a CSV without a header: columns by position - domain, tier, owner, bu, tags - all optional except the first.
+    Lines starting with # and text after # are ignored. Tiers: critical, high, medium (default), low.
+    """
     text = _read_input(path)
-    lines = [l for l in text.splitlines() if l.strip() and not l.lstrip().startswith("#")]
-    first = lines[0].lower() if lines else ""
-    is_csv = path.lower().endswith((".csv", ".tsv")) or bool(
-        re.match(r"^\s*\"?(domain|dominio|domains|fqdn)\"?\s*[,;\t]", first))
+    lines = [l.split("#", 1)[0].rstrip() for l in text.splitlines()]
+    lines = [l for l in lines if l.strip()]
     inputs: Dict[str, DomainInput] = {}
     invalid: List[str] = []
-    if is_csv:
+
+    def add(raw: str, row: Dict[str, str]) -> None:
+        raw = raw.strip().strip('"').strip()
+        d = normalize_domain(raw)
+        if not d:
+            if raw:
+                invalid.append(raw)
+        elif d not in inputs:
+            inputs[d] = _domain_input(d, row)
+
+    if not lines:
+        return [], []
+    header = _header_map(FIELD_SPLIT.split(lines[0].strip()))
+    if header:
         try:
             dialect = csv.Sniffer().sniff(lines[0], delimiters=",;\t")
         except csv.Error:
             dialect = csv.excel
-        reader = csv.DictReader(io.StringIO("\n".join(lines)), dialect=dialect)
-        colmap = {}
-        for col in reader.fieldnames or []:
-            key = col.strip().lower()
-            for target, aliases in CSV_COLUMNS.items():
-                if key in aliases:
-                    colmap[target] = col
-        if "domain" not in colmap:
-            raise ValueError("CSV input needs a 'domain' column")
-        for row in reader:
-            raw = (row.get(colmap["domain"]) or "").strip()
-            d = normalize_domain(raw)
-            if not d:
-                if raw:
-                    invalid.append(raw)
-                continue
-            if d in inputs:
-                continue
-            tier_raw = (row.get(colmap.get("tier", ""), "") or "").strip().lower()
-            tags = [t.strip() for t in re.split(r"[|,;]", row.get(colmap.get("tags", ""), "") or "") if t.strip()]
-            inputs[d] = DomainInput(domain=d, tier=TIER_ALIASES.get(tier_raw, "medium"),
-                                    owner=(row.get(colmap.get("owner", ""), "") or "").strip(),
-                                    bu=(row.get(colmap.get("bu", ""), "") or "").strip(), tags=tags)
-    else:
-        for line in lines:
-            for token in re.split(r"[,\s;]+", line.split("#", 1)[0].strip()):
-                if not token:
-                    continue
-                d = normalize_domain(token)
-                if not d:
-                    invalid.append(token)
-                elif d not in inputs:
-                    inputs[d] = DomainInput(domain=d)
+        for cells in csv.reader(io.StringIO("\n".join(lines[1:])), dialect=dialect):
+            row = {k: (cells[i] if i < len(cells) else "") for k, i in header.items()}
+            add(row.get("domain", ""), row)
+        return list(inputs.values()), invalid
+
+    tiers = set(TIER_ALIASES) | set(TIER_ALIASES.values())
+    for line in lines:
+        cells = [c.strip().strip('"').strip() for c in FIELD_SPLIT.split(line.strip())]
+        # "example.com;critical;owner..." (or with the tier left empty) is a row with metadata;
+        # anything else is a list of domains ("a.com, b.com" or "a.com b.com")
+        if len(cells) > 1 and (cells[1].lower() in tiers or cells[1] == "") and " " not in cells[0]:
+            add(cells[0], dict(zip(POSITIONAL, cells)))
+            continue
+        for token in re.split(r"[,\s;]+", line.strip()):
+            if token:
+                add(token, {})
     return list(inputs.values()), invalid
 
 
