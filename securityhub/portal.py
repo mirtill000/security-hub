@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from .common import EXIT_OK, EXIT_USAGE, Parser, grade, json_for_html
-from . import ui
+from . import inventory, ui
 
 __version__ = "1.2.0"
 
@@ -247,7 +247,7 @@ def exec_dns(payload: dict) -> dict:
     crit = [r for r in rows if r.get("tier") == "critical"]
     kpis = [_kpi("spoof", "Domains protected against spoofing", _pct(len(enforced), n), "%",
                  f"{len(enforced)} of {n} domains enforce DMARC", 100, area="dns", hash_="#/domains?comp=dmarc_enforcement:fail")]
-    side = [["Can be impersonated by email", f"{len(spoofable)} domains", "bad" if spoofable else "good"]]
+    side = [["Can be impersonated by email", f"{len(spoofable)} domain{'' if len(spoofable) == 1 else 's'}", "bad" if spoofable else "good"]]
     if crit:
         ok = sum(r in enforced for r in crit)
         side.append(["Critical-tier domains protected", f"{ok} of {len(crit)}", "good" if ok == len(crit) else "bad"])
@@ -255,7 +255,7 @@ def exec_dns(payload: dict) -> dict:
     if "takeover" in checks:
         tk = [r for r in rows if (r.get("takeover") or {}).get("status") == "error"]
         exposure = bool(tk)
-        side.append(["Exposed to takeover of a dependency", f"{len(tk)} domains", "bad" if tk else "good"])
+        side.append(["Exposed to takeover of a dependency", f"{len(tk)} domain{'' if len(tk) == 1 else 's'}", "bad" if tk else "good"])
     mail = [r for r in rows if r.get("profile") == "mail"]
     if mail and "dkim" in checks:
         signed = sum((r.get("dkim") or {}).get("status") in ("valid", "partial") for r in mail)
@@ -398,7 +398,7 @@ def load_report(path: str, idx: int) -> dict:
     when = parse_date(summary.get("generated", "")) or datetime.fromtimestamp(os.path.getmtime(path), timezone.utc)
     return {"id": f"r{idx}", "type": kind, "label": TYPE_LABEL[kind], "title": title, "file": os.path.basename(path),
             "date": when.strftime("%Y-%m-%dT%H:%M:%SZ"), "subject": subject_of(kind, payload),
-            "size": len(text.encode("utf-8")), "grade": grade(summary["score"]), **summary, "html": text}
+            "size": len(text.encode("utf-8")), "grade": grade(summary["score"]), **summary, "html": text, "payload": payload}
 
 
 def find_reports(inputs: List[str], include_all: bool) -> List[str]:
@@ -491,8 +491,9 @@ def split_history(reports: List[dict]) -> Tuple[List[dict], dict]:
 
 def build_hub(reports: List[dict], out: str, title: str, history: Optional[dict] = None) -> int:
     meta = {"version": __version__, "title": title, "generated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-            "portfolio": portfolio(reports), "history": history or {"series": [], "runs": []}}
-    index = [{k: v for k, v in r.items() if k != "html"} for r in reports]
+            "portfolio": portfolio(reports), "history": history or {"series": [], "runs": []},
+            "inventory": inventory.build(reports)}
+    index = [{k: v for k, v in r.items() if k not in ("html", "payload")} for r in reports]
     blocks = "\n".join(f'<script type="application/json" id="rep-{r["id"]}">{_json_for_html(r["html"])}</script>' for r in reports)
     page = (HUB_TEMPLATE.replace("__TITLE__", html.escape(title or "GuardHub")).replace("__CSS__", HUB_CSS).replace("__JS__", HUB_JS)
             .replace("__DATA__", _json_for_html({"meta": meta, "reports": index}))
@@ -540,9 +541,16 @@ def posture(reports: List[dict], history: Optional[dict] = None) -> dict:
     pf = portfolio(reports)
     scores = [a["score"] for a in areas if a["score"] is not None]
     overall = round(sum(scores) / len(scores)) if scores else None
+    inv = inventory.build(reports)
+    assets = [{"asset": a["key"], "status": a["status"], "tier": a["tier"], "score": a["score"], "owners": a["owners"],
+               "domains": [d["domain"] for d in a["dns"]], "websites": [w["domain"] for w in a["web"]],
+               "next_expiry": a["next_expiry"] and {k: a["next_expiry"][k] for k in ("kind", "name", "date", "days")},
+               "signals": [{k: s[k] for k in ("severity", "code", "text")} for s in a["signals"]]}
+              for a in inv["assets"]]
     return {"tool": f"GuardHub {__version__}", "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "overall_score": overall, "overall_grade": grade(overall), "summary": pf["sentence"], "counts": pf["counts"],
-            "areas": areas, "actions": pf["actions"], "runs": (history or {}).get("runs", [])}
+            "areas": areas, "actions": pf["actions"], "assets": {"summary": inv["summary"], "items": assets},
+            "runs": (history or {}).get("runs", [])}
 
 
 def main(argv: Optional[List[str]] = None) -> int:

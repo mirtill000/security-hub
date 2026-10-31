@@ -74,6 +74,50 @@
        ]
       }
      ]
+    },
+    {
+     "site_id": 4,
+     "domain": "www.fabrikam.example",
+     "display_name": "www.fabrikam.example",
+     "active": "active",
+     "status": "fully_configured",
+     "ssl": {
+      "custom_certificate": {
+       "active": true,
+       "expirationDate": 4102444800000
+      }
+     },
+     "dns": [
+      {
+       "dns_record_name": "www.fabrikam.example",
+       "set_type_to": "CNAME",
+       "set_data_to": [
+        "x.impervadns.net"
+       ]
+      }
+     ]
+    },
+    {
+     "site_id": 5,
+     "domain": "portal.northwind.example",
+     "display_name": "portal.northwind.example",
+     "active": "active",
+     "status": "fully_configured",
+     "ssl": {
+      "custom_certificate": {
+       "active": true,
+       "expirationDate": 1735689600000
+      }
+     },
+     "dns": [
+      {
+       "dns_record_name": "portal.northwind.example",
+       "set_type_to": "CNAME",
+       "set_data_to": [
+        "x.impervadns.net"
+       ]
+      }
+     ]
     }
    ],
    "policies": [
@@ -147,7 +191,17 @@
       "id": 102
      }
     ],
-    "3": []
+    "3": [],
+    "4": [
+     {
+      "id": 102
+     }
+    ],
+    "5": [
+     {
+      "id": 101
+     }
+    ]
    },
    "site_errors": {},
    "traffic": {}

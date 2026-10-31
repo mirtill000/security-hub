@@ -13,7 +13,7 @@ const ICONS = {
   left: '<path d="m15 6-6 6 6 6"/>', sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>', link: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3A4.5 4.5 0 0 0 13 4.6l-1 1M14 10a4.5 4.5 0 0 0-6.4 0l-3 3A4.5 4.5 0 0 0 11 19.4l1-1"/>',
   trend: '<path d="M3 17l6-6 4 4 8-8M15 7h6v6"/>', search: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4-4"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
-  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>', print: '<path d="M6 9V3h12v6M6 18H4v-7h16v7h-2M8 14h8v7H8z"/>'
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>', assets: '<path d="M12 3 3 7.5l9 4.5 9-4.5L12 3z"/><path d="m3 12 9 4.5 9-4.5M3 16.5 12 21l9-4.5"/>', print: '<path d="M6 9V3h12v6M6 18H4v-7h16v7h-2M8 14h8v7H8z"/>'
 };
 const icon = (n, s) => `<svg class="ico" width="${s || 16}" height="${s || 16}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n] || ICONS.other}</svg>`;
 
@@ -129,11 +129,104 @@ function trends() {
       ${RUNS.map(r => `<tr><td>${esc(fmtD(r.date))}</td><td>${esc(r.label)}</td><td class="mono">${esc(r.file)}</td><td>${r.current ? '<span class="pill s-pass">current, embedded</span>' : '<span class="faint">history</span>'}</td></tr>`).join('')}</table></div></details>`;
 }
 
-/* ---------- state & routing: #/overview, #/trends or #/r/<id>?h=<report hash> ---------- */
-const S = {route: 'overview', id: null};
-function toHash() { if (S.route === 'trends') return '#/trends'; if (S.route !== 'r') return '#/overview'; const f = frames[S.id]; return `#/r/${S.id}${f && f.hash ? '?h=' + encodeURIComponent(f.hash) : ''}`; }
+/* ---------- assets: one view per organization domain across e-mail/DNS, WAF, certificates, tenant ---------- */
+const INV = M.inventory || {assets: [], summary: {}}, AS = INV.assets || [], AQ = () => (S.aq || '').trim().toLowerCase();
+const hasAssets = () => AS.length > 0;
+const A_FILTERS = [['all', 'All', () => true], ['risk', 'At risk', a => a.status === 'bad'], ['attention', 'Needs attention', a => a.status === 'warn'],
+  ['gaps', 'Coverage gaps', a => a.coverage_gap], ['expiring', 'Expiring', a => a.expiries.some(e => e.days !== null && e.days <= 30)]];
+const CTL = {valid: 's-pass', partial: 's-warn', warning: 's-warn', missing: 's-none', misconfigured: 's-fail', error: 's-fail', invalid: 's-fail', bogus: 's-fail'};
+const ctlPill = v => v ? `<span class="pill ${CTL[v] || 's-na'}">${esc(v)}</span>` : '<span class="faint">-</span>';
+const scoreTxt = n => n === null || n === undefined ? '<span class="faint">-</span>' : `<span class="score ${scoreCls(n)}">${esc(n)}</span>`;
+const stPill = st => { const x = AREA_ST[st || 'unknown']; return `<span class="pill s-${x[1]}">${esc(x[0])}</span>`; };
+const tierTag = t => `<span class="tag tier-${esc(t)}">${esc(t)}</span>`;
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+const SEP = '<span class="faint"> \u00b7 </span>';
+function expiryTxt(e) {
+  if (!e || e.days === null || e.days === undefined) return '<span class="faint">-</span>';
+  const cls = e.days < 0 || e.days <= (e.kind === 'certificate' ? 7 : 14) ? 'tx-bad' : e.days <= (e.kind === 'certificate' ? 30 : 60) ? 'tx-warn' : 'faint';
+  const when = e.days < 0 ? `expired ${plural(-e.days, 'day')} ago` : e.days > 730 ? `in ${Math.floor(e.days / 365)} years` : `in ${plural(e.days, 'day')}`;
+  return `<span class="${cls}">${when}</span>`;
+}
+const sigCount = a => { const c = a.signals.filter(x => x.severity === 'critical').length, w = a.signals.filter(x => x.severity === 'warning').length;
+  return (c ? `<span class="pill s-fail">${c} critical</span> ` : '') + (w ? `<span class="pill s-warn">${w} warning</span>` : '') || '<span class="faint">none</span>'; };
+function assetMatches(a) {
+  const q = AQ(); if (!q) return true;
+  return [a.key, ...a.owners, ...a.bus, ...a.dns.map(d => d.domain), ...a.web.map(w => w.domain)].some(x => String(x).toLowerCase().includes(q));
+}
+function assetList() {
+  const f = (A_FILTERS.find(x => x[0] === S.af) || A_FILTERS[0]), rows = AS.filter(f[2]).filter(assetMatches), sm = INV.summary || {};
+  const presets = A_FILTERS.map(([k, l, fn]) => `<button class="preset" data-af="${k}" aria-pressed="${S.af === k}">${esc(l)}<span class="n">${AS.filter(fn).length}</span></button>`).join('');
+  const body = rows.map(a => { const root = a.dns.find(d => d.domain === a.key) || a.dns[0], byp = a.web.filter(w => w.profile === 'bypass').length, unp = a.web.filter(w => !w.protected).length;
+    return `<tr data-asset="${esc(a.key)}"><td class="sticky"><button class="dom" data-asset="${esc(a.key)}">${esc(a.key)}</button><div class="dom-sub">${esc([...a.owners, ...a.bus].join(', ') || ' ')}</div></td>
+      <td>${tierTag(a.tier)}</td><td>${stPill(a.status)}</td>
+      <td>${root ? `${scoreTxt(a.dns_score)}${SEP}<span class="faint">DMARC</span> <span class="${root.enforced ? 'tx-good' : 'tx-bad'}">${esc(root.dmarc)}</span>${a.dns.length > 1 ? `${SEP}<span class="faint">${plural(a.dns.length, 'domain')}</span>` : ''}` : '<span class="faint">not assessed</span>'}</td>
+      <td>${a.web.length ? `${scoreTxt(a.web_score)}${SEP}<span class="faint">${plural(a.web.length, 'site')}</span>${byp ? `${SEP}<span class="tx-bad">${byp} in bypass</span>` : unp ? `${SEP}<span class="tx-warn">${unp} not blocking</span>` : ''}` : '<span class="faint">none</span>'}</td>
+      <td class="nowrap">${expiryTxt(a.next_expiry)}</td>
+      <td><div class="asset-sig">${sigCount(a)}${a.signals[0] ? `<span class="asset-sig-t">${esc(a.signals[0].text)}</span>` : ''}</div></td></tr>`; }).join('');
+  return `<div class="section-title"><h2>Assets</h2><p>${plural(sm.total || 0, 'organization domain')}: ${plural(sm.domains || 0, 'mail domain')} and ${plural(sm.websites || 0, 'website')} joined across reports, with the problems that only show when areas are seen together</p></div>
+    <div class="presets" role="group" aria-label="Filter assets">${presets}</div>
+    <div class="toolbar"><div class="search-box">${icon('search')}<input id="aq" type="search" placeholder="Filter by domain, website, owner, business unit" value="${esc(S.aq || '')}" aria-label="Filter assets"></div><span class="spacer"></span><span class="faint">${plural(rows.length, 'asset')}</span></div>
+    ${rows.length ? `<div class="grid-wrap asset-grid"><table class="grid"><thead><tr><th class="sticky">Asset</th><th>Tier</th><th>Status</th><th>E-mail and DNS</th><th>Websites (WAF)</th><th>Next expiry</th><th>Signals</th></tr></thead><tbody>${body}</tbody></table></div>`
+      : '<div class="card empty"><b>No assets match</b>Change the filter or the search text.</div>'}
+    <p class="faint exec-note">Assets are grouped by the domains assessed for e-mail security; websites join the domain they belong to. Scores are the lowest of each area.</p>`;
+}
+const openBtn = (rid, h, label) => rid ? `<button class="btn" data-go="${esc(rid)}" data-h="${esc(h || '')}">${esc(label || 'Open')}</button>` : '';
+function assetDetail(a) {
+  if (!a) return '<div class="card empty"><b>Asset not found</b>It is not in the latest reports.</div>';
+  const sig = a.signals.length ? `<section class="card exec-actions asset-signals"><header><h2>Signals</h2><p>Problems of this asset across areas, most severe first</p></header><div class="body"><ul>
+    ${a.signals.map(x => `<li><button class="exec-act"${x.report ? ` data-go="${esc(x.report)}" data-h="${esc(x.hash)}"` : ''}><span class="sev-bar sev-${esc(x.severity === 'critical' ? 'critical' : 'warning')}"></span>
+      <span class="exec-act-main"><b>${esc(x.text)}</b><span class="exec-act-rec">${esc(SIG_LABEL[x.code] || '')}</span></span><span class="exec-act-meta"><span class="pill ${x.severity === 'critical' ? 's-fail' : 's-warn'}">${esc(x.severity)}</span></span></button></li>`).join('')}</ul></div></section>`
+    : '<section class="card"><div class="body muted">No cross-area signals for this asset.</div></section>';
+  const dns = a.dns.length ? `<div class="grid-wrap asset-sub"><table class="grid"><thead><tr><th>Domain</th><th>Score</th><th>DMARC</th><th>SPF</th><th>MTA-STS</th><th>DNSSEC</th><th>Main finding</th><th></th></tr></thead><tbody>
+    ${a.dns.map(d => `<tr data-go="${esc(d.report)}" data-h="${esc(d.hash)}"><td><b>${esc(d.domain)}</b><div class="dom-sub">${esc(d.profile || '')}</div></td><td>${scoreTxt(d.score)}</td>
+      <td><span class="pill ${d.enforced ? 's-pass' : 's-fail'}">${esc(d.dmarc)}</span></td><td>${ctlPill(d.spf)}</td><td>${ctlPill(d.mta_sts)}</td><td>${ctlPill(d.dnssec)}</td>
+      <td class="sub">${esc(d.main)}</td><td>${openBtn(d.report, d.hash)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Not in the e-mail and DNS assessment.</p>';
+  const web = a.web.length ? `<div class="grid-wrap asset-sub"><table class="grid"><thead><tr><th>Website</th><th>Score</th><th>Mode</th><th>Blocks attacks</th><th>Certificate</th><th>Main finding</th><th></th></tr></thead><tbody>
+    ${a.web.map(w => `<tr data-go="${esc(w.report)}" data-h="${esc(w.hash)}"><td><b>${esc(w.domain)}</b><div class="dom-sub">${esc(w.account || '')}</div></td><td>${scoreTxt(w.score)}</td>
+      <td><span class="pill ${w.profile === 'bypass' ? 's-fail' : w.profile === 'protected' ? 's-pass' : 's-warn'}">${esc(w.profile)}</span></td>
+      <td><span class="pill ${w.protected ? 's-pass' : 's-fail'}">${w.protected ? 'yes' : 'no'}</span></td>
+      <td class="nowrap">${w.cert_expires ? esc(w.cert_expires) + ' ' : ''}${expiryTxt({kind: 'certificate', days: w.cert_days !== null && w.cert_days !== undefined ? w.cert_days : w.served_cert_days})}</td>
+      <td class="sub">${esc(w.main)}</td><td>${openBtn(w.report, w.hash)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No website of this domain is protected by the WAF assessed.</p>';
+  const exp = a.expiries.length ? `<table class="keys asset-exp">${a.expiries.map(e => `<tr><td>${esc(e.name)}</td><td class="faint">${esc(e.kind)}, ${esc(e.source)}</td><td class="mono">${esc(e.date || '')}</td><td class="r">${expiryTxt(e)}</td></tr>`).join('')}</table>`
+    : '<p class="muted">No certificate or registration date known.</p>';
+  const t = a.tenant;
+  const kv = [['Lowest score', scoreTxt(a.score)], ['E-mail and DNS', a.dns.length ? `${scoreTxt(a.dns_score)} <span class="faint">${plural(a.dns.length, 'domain')}</span>` : '<span class="faint">not assessed</span>'],
+    ['Websites', a.web.length ? `${scoreTxt(a.web_score)} <span class="faint">${plural(a.web.length, 'site')}</span>` : '<span class="faint">none</span>'],
+    ['Next expiry', a.next_expiry ? `${expiryTxt(a.next_expiry)} <span class="faint">${esc(a.next_expiry.kind)}</span>` : '<span class="faint">-</span>'],
+    ['Microsoft tenant', t ? `${scoreTxt(t.score)} <span class="faint">${esc(t.name)}</span>` : '<span class="faint">not linked</span>'],
+    ['Owners', esc([...a.owners, ...a.bus].join(', ') || '-')]];
+  return `<section class="card asset-head"><div class="body"><div class="asset-title"><h2>${esc(a.key)}</h2>${stPill(a.status)}${tierTag(a.tier)}<span class="spacer"></span>${t ? openBtn(t.report, t.hash, 'Zero Trust report') : ''}</div>
+      <div class="kv">${kv.map(([k, v]) => `<div><span>${esc(k)}</span><b>${v}</b></div>`).join('')}</div></div></section>
+    ${sig}
+    <section class="card asset-card"><header><span class="hub-type">${icon('dns', 14)}E-mail and DNS security</span></header><div class="body">${dns}</div></section>
+    <section class="card asset-card"><header><span class="hub-type">${icon('waf', 14)}Websites protected by the WAF</span></header><div class="body">${web}</div></section>
+    <section class="card asset-card"><header><span class="hub-type">${icon('info', 14)}Certificates and registrations</span></header><div class="body">${exp}</div></section>`;
+}
+const SIG_LABEL = {
+  WEB_AND_MAIL_EXPOSED: 'Cross-area: the website can be attacked directly and the domain can be used for phishing in its name',
+  WEB_BYPASS: 'Set the website back to active mode in the WAF', WEB_ORIGIN_EXPOSED: 'Restrict the origin to the WAF addresses only',
+  WEB_NOT_BLOCKING: 'Set SQL injection, XSS, RFI and illegal resource access to block', DNS_TAKEOVER: 'Remove the reference or register the domain',
+  MAIL_SPOOFABLE: 'Move DMARC to p=quarantine, then p=reject', EXPIRED: 'Renew now', EXPIRING: 'Plan the renewal',
+  DNS_NOT_MONITORED: 'Coverage gap: add the domain to the DNS / e-mail assessment'};
+function assetsView() { return S.asset ? assetDetail(AS.find(a => a.key === S.asset)) : assetList(); }
+function assetsCard() {
+  const top = AS.filter(a => a.status === 'bad' || a.status === 'warn').slice(0, 5);
+  if (!top.length) return '';
+  return `<section class="card exec-actions"><header><h2>Assets needing attention</h2><p>Domains and websites seen across e-mail/DNS, WAF and certificates</p></header>
+    <div class="body"><ul>${top.map(a => `<li><button class="exec-act" data-asset="${esc(a.key)}"><span class="sev-bar sev-${a.status === 'bad' ? 'critical' : 'warning'}"></span>
+      <span class="exec-act-main"><b>${esc(a.key)}</b><span class="exec-act-rec">${esc((a.signals[0] || {}).text || 'Lowest score ' + a.score)}</span></span>
+      <span class="exec-act-meta">${tierTag(a.tier)}<span class="exec-act-n">${plural(a.signals.length, 'signal')}</span></span></button></li>`).join('')}</ul>
+      <button class="btn" data-assets style="margin-top:10px">All ${plural(AS.length, 'asset')}</button></div></section>`;
+}
+
+/* ---------- state & routing: #/overview, #/trends, #/assets[?a=<asset>|?f=<filter>] or #/r/<id>?h=<report hash> ---------- */
+const S = {route: 'overview', id: null, asset: null, af: 'all', aq: ''};
+function toHash() { if (S.route === 'trends') return '#/trends';
+  if (S.route === 'assets') return '#/assets' + (S.asset ? '?a=' + encodeURIComponent(S.asset) : S.af !== 'all' ? '?f=' + S.af : ''); if (S.route !== 'r') return '#/overview'; const f = frames[S.id]; return `#/r/${S.id}${f && f.hash ? '?h=' + encodeURIComponent(f.hash) : ''}`; }
 function fromHash() {
   if (location.hash === '#/trends' && hasTrends()) return {route: 'trends', id: null, inner: ''};
+  const am = location.hash.match(/^#\/assets(?:\?(.*))?$/);
+  if (am && hasAssets()) { const q = new URLSearchParams(am[1] || ''); return {route: 'assets', id: null, inner: '', asset: q.get('a'), af: q.get('f') || 'all'}; }
   const m = location.hash.match(/^#\/r\/([^?]+)(?:\?h=(.*))?$/);
   if (m && RP.some(r => r.id === m[1])) return {route: 'r', id: m[1], inner: m[2] ? decodeURIComponent(m[2]) : ''};
   return {route: 'overview', id: null, inner: ''};
@@ -146,9 +239,10 @@ function open(id, inner, push) {
   render();
   frames[id].el.focus();
 }
-function page(route, push) { S.route = route; S.id = null; const h = route === 'trends' ? '#/trends' : '#/overview'; if (location.hash !== h) history[push === false ? 'replaceState' : 'pushState'](null, '', h); render(); window.scrollTo(0, 0); }
+function page(route, push) { S.route = route; S.id = null; if (route !== 'assets') S.asset = null; const h = toHash(); if (location.hash !== h) history[push === false ? 'replaceState' : 'pushState'](null, '', h); render(); window.scrollTo(0, 0); }
 const home = push => page('overview', push);
-window.addEventListener('popstate', () => { const r = fromHash(); r.route === 'r' ? open(r.id, r.inner, false) : page(r.route, false); });
+function openAsset(key, push) { S.asset = key; page('assets', push); }
+window.addEventListener('popstate', () => { const r = fromHash(); if (r.route === 'r') { open(r.id, r.inner, false); return; } S.asset = r.asset || null; S.af = r.af || 'all'; page(r.route, false); });
 
 /* ---------- chrome ---------- */
 function subNav(r) {
@@ -163,6 +257,7 @@ function side() {
   return `<div class="brand"><div class="brand-mark">${icon('shield', 18)}</div><div><b>GuardHub</b>${M.title ? `<small>${esc(M.title)}</small>` : ''}</div></div>
     <nav class="nav" aria-label="Portal"><button class="nav-item" data-home${S.route === 'overview' ? ' aria-current="page"' : ''}>${icon('grid')}<span>Overview</span></button>
       ${hasTrends() ? `<button class="nav-item" data-trends${S.route === 'trends' ? ' aria-current="page"' : ''}>${icon('trend')}<span>Trends</span><span class="count">${RUNS.length}</span></button>` : ''}
+      ${hasAssets() ? `<button class="nav-item" data-assets${S.route === 'assets' ? ' aria-current="page"' : ''}>${icon('assets')}<span>Assets</span><span class="count">${AS.length}</span></button>` : ''}
       <div class="nav-sep">Reports</div>
       ${RP.map(r => { const on = S.route === 'r' && S.id === r.id;
         return `<button class="nav-item hub-item${on ? ' on' : ''}" data-open="${r.id}"${on && !(frames[r.id] && frames[r.id].nav.some(x => x.current)) ? ' aria-current="page"' : ''} title="${esc(r.title)}">${icon(r.type)}
@@ -173,6 +268,9 @@ function side() {
 }
 const searchBtn = `<button class="cmdk" data-action="palette" aria-label="Search all reports">${icon('search')}<span class="lbl">Search all reports</span><span class="kbd">Ctrl K</span></button>`;
 function topbar() {
+  if (S.route === 'assets' && S.asset) return `<button class="btn icon ghost" data-assets aria-label="Back to the assets" title="Assets">${icon('left')}</button>
+    <div class="hub-crumb"><span class="faint">Assets</span><span class="faint">/</span><h1>${esc(S.asset)}</h1></div><span class="spacer"></span>${searchBtn}<button class="btn" data-action="print">${icon('print')}<span>Print</span></button>`;
+  if (S.route === 'assets') return `<h1>Assets</h1><span class="sub">${plural(AS.length, 'asset')} across reports</span><span class="spacer"></span>${searchBtn}<button class="btn" data-action="print">${icon('print')}<span>Print</span></button>`;
   if (S.route === 'trends') return `<h1>Trends</h1><span class="sub">${RUNS.length} assessments</span><span class="spacer"></span>${searchBtn}<button class="btn" data-action="print">${icon('print')}<span>Print</span></button>`;
   if (S.route !== 'r') return `<h1>${esc(M.title || 'Overview')}</h1><span class="sub">${RP.length} report${RP.length === 1 ? '' : 's'}, portal generated ${esc(M.generated)}</span><span class="spacer"></span>
     ${searchBtn}<button class="btn" data-action="print">${icon('print')}<span>Print overview</span></button>`;
@@ -232,7 +330,7 @@ function overview() {
   return `<div class="print-head"><h1>${esc(M.title || 'GuardHub')}</h1><p class="muted">Generated ${esc(M.generated)}</p></div>
     ${areaHtml}
     ${kpiHtml ? `<div class="section-title exec-sec"><h2>Key indicators</h2><p>Outcomes measured across all reports. Select one to see the affected items.</p></div>${kpiHtml}` : ''}
-    ${actHtml}${detail}
+    ${actHtml}${assetsCard()}${detail}
     <p class="faint exec-note">Each tool scores on its own scale: grades are not comparable across areas. Targets on the bars mark the expected end state.</p>`;
 }
 function render() {
@@ -240,10 +338,10 @@ function render() {
   chrome();
   const inReport = S.route === 'r';
   document.body.classList.toggle('in-report', inReport);
-  $('#view').innerHTML = inReport ? '' : S.route === 'trends' ? trends() : overview();
+  $('#view').innerHTML = inReport ? '' : S.route === 'trends' ? trends() : S.route === 'assets' ? assetsView() : overview();
   Object.entries(frames).forEach(([id, f]) => { f.el.hidden = !(inReport && id === S.id); });
   const r = inReport ? RP.find(x => x.id === S.id) : null;
-  document.title = (r ? r.label + ' - ' : S.route === 'trends' ? 'Trends - ' : '') + (M.title || 'GuardHub');
+  document.title = (r ? r.label + ' - ' : S.route === 'trends' ? 'Trends - ' : S.route === 'assets' ? (S.asset ? S.asset + ' - ' : '') + 'Assets - ' : '') + (M.title || 'GuardHub');
 }
 
 /* ---------- search across all reports ---------- */
@@ -272,10 +370,12 @@ function buildIndex() {
 function paletteItems(q) {
   q = q.trim().toLowerCase();
   const out = [], add = (g, t, h, run) => out.push({g, t, h, run});
-  [['Overview', () => home()], ...(hasTrends() ? [['Trends', () => page('trends')]] : [])].forEach(([t, fn]) => { if (!q || t.toLowerCase().includes(q)) add('Go to', t, '', fn); });
+  [['Overview', () => home()], ...(hasTrends() ? [['Trends', () => page('trends')]] : []), ...(hasAssets() ? [['Assets', () => openAsset(null)]] : [])].forEach(([t, fn]) => { if (!q || t.toLowerCase().includes(q)) add('Go to', t, '', fn); });
   RP.forEach(r => { if (!q || r.label.toLowerCase().includes(q) || (r.subtitle || '').toLowerCase().includes(q)) add('Reports', r.label, r.subtitle, () => open(r.id, '')); });
   if (S.route === 'r' && frames[S.id]) frames[S.id].nav.filter(x => x.route || x.pillar).forEach(x => { if (!q || x.label.toLowerCase().includes(q)) add('In this report', x.label, x.count, () => tell(S.id, {mgHubClick: x.route ? {route: x.route} : {pillar: x.pillar}})); });
   if (q) {
+    AS.filter(a => [a.key, ...a.owners, ...a.dns.map(d => d.domain), ...a.web.map(w => w.domain)].some(x => String(x).toLowerCase().includes(q))).slice(0, 6)
+      .forEach(a => add('Assets', a.key, `${AREA_ST[a.status][0]}, ${plural(a.signals.length, 'signal')}`, () => openAsset(a.key)));
     if (!INDEX) buildIndex();
     const per = {};
     INDEX.filter(e => e.s.includes(q)).forEach(e => { const k = e.r.id + (e.kind || ''); per[k] = (per[k] || 0) + 1;
@@ -310,16 +410,19 @@ function about() {
     <div class="dbody"><p style="margin-bottom:10px">Generated ${esc(M.generated)} with GuardHub ${esc(M.version)}.</p>
     <table class="keys">${RP.map(r => `<tr><td>${esc(r.label)}</td><td class="mono">${esc(r.file)}</td><td class="r">${(r.size / 1048576).toFixed(1)} MB</td>${r.history > 1 ? `<td class="faint">${r.history} runs</td>` : '<td></td>'}</tr>`).join('')}</table>
     <p class="muted" style="margin-top:12px">Grades are computed by each tool on its own scale and are not comparable across tools. Each report runs in an isolated frame: it cannot read the portal or the other reports. Search covers every domain, website, test and finding in the embedded reports.</p>
-    <p class="muted" style="margin-top:8px">Shortcuts: <span class="kbd">Ctrl K</span> search, <span class="kbd">0</span> overview, <span class="kbd">1</span>-<span class="kbd">${RP.length}</span> reports${hasTrends() ? ', <span class="kbd">t</span> trends' : ''}.</p></div></div></div>`;
+    <p class="muted" style="margin-top:8px">Shortcuts: <span class="kbd">Ctrl K</span> search, <span class="kbd">0</span> overview, <span class="kbd">1</span>-<span class="kbd">${RP.length}</span> reports${hasTrends() ? ', <span class="kbd">t</span> trends' : ''}${hasAssets() ? ', <span class="kbd">a</span> assets' : ''}.</p></div></div></div>`;
 }
 document.addEventListener('click', e => {
-  const t = e.target.closest('button, tr[data-go], [data-overlay], [data-pal]');
+  const t = e.target.closest('button, tr[data-go], tr[data-asset], [data-overlay], [data-pal]');
   if (!t) return;
   const ds = t.dataset;
   if (ds.overlay !== undefined && e.target === t) { closeOverlay(); return; }
   if (ds.pal !== undefined) { runPalette(+ds.pal); return; }
   if (ds.home !== undefined) { home(); return; }
   if (ds.trends !== undefined) { page('trends'); return; }
+  if (ds.assets !== undefined) { openAsset(null); return; }
+  if (ds.asset) { openAsset(ds.asset); window.scrollTo(0, 0); return; }
+  if (ds.af) { S.af = ds.af; history.replaceState(null, '', toHash()); render(); return; }
   if (ds.open) { if (S.route === 'r' && S.id === ds.open && frames[ds.open]) tell(ds.open, {mgHubClick: {route: 'overview'}}); else open(ds.open, ''); return; }
   if (ds.subRoute) { tell(S.id, {mgHubClick: {route: ds.subRoute}}); frames[S.id].el.focus(); return; }
   if (ds.subPillar) { tell(S.id, {mgHubClick: {pillar: ds.subPillar}}); frames[S.id].el.focus(); return; }
@@ -335,7 +438,10 @@ document.addEventListener('click', e => {
   };
   if (acts[ds.action]) acts[ds.action]();
 });
-document.addEventListener('input', e => { if (e.target.id === 'pal-q' && pal) { pal.items = paletteItems(e.target.value); pal.idx = 0; renderPalette(); } });
+document.addEventListener('input', e => {
+  if (e.target.id === 'pal-q' && pal) { pal.items = paletteItems(e.target.value); pal.idx = 0; renderPalette(); }
+  if (e.target.id === 'aq') { const pos = e.target.selectionStart; S.aq = e.target.value; $('#view').innerHTML = assetsView(); const n = $('#aq'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }
+});
 document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); pal ? closeOverlay() : openPalette(); return; }
   if (pal) {
@@ -349,7 +455,7 @@ document.addEventListener('keydown', e => {
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === '/') { e.preventDefault(); openPalette(); return; }
   const n = parseInt(e.key, 10);
-  if (e.key === '0') home(); else if (e.key === 't' && hasTrends()) page('trends'); else if (n >= 1 && n <= RP.length) open(RP[n - 1].id, '');
+  if (e.key === '0') home(); else if (e.key === 't' && hasTrends()) page('trends'); else if (e.key === 'a' && hasAssets()) openAsset(null); else if (n >= 1 && n <= RP.length) open(RP[n - 1].id, '');
 });
 
 applyTheme();

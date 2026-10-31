@@ -96,6 +96,21 @@ body.in-report .content { display: none; }
 body.in-report { overflow: hidden; }
 tr[data-go] { cursor: pointer; }
 @media (max-width: 860px) { .rep-frame { height: calc(100vh - 110px); } body.in-report { overflow: auto; } }
-@media print { #frames { display: none !important; } }
+/* assets */
+.asset-grid { max-height: none; min-height: 0; }
+.asset-grid td { vertical-align: top; }
+.asset-grid td:not(:last-child) { white-space: nowrap; }
+.asset-grid .dom { word-break: normal; }
+.asset-sig { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; min-width: 240px; max-width: 420px; }
+.asset-sig-t { flex-basis: 100%; font-size: 12.5px; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.asset-head { margin-bottom: 16px; }
+.asset-title { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
+.asset-title h2 { font-size: 20px; word-break: break-all; } .asset-title .spacer { flex: 1; }
+.asset-signals { margin-top: 0; }
+.asset-card { margin-bottom: 16px; }
+.asset-sub { max-height: none; min-height: 0; }
+.asset-sub td.sub { color: var(--muted); font-size: 12.5px; min-width: 220px; }
+.asset-exp td { padding: 6px 12px 6px 0; }
+@media print { #frames { display: none !important; } .asset-grid, .asset-sub { overflow: visible; } }
 
 /* @include print-head.css */
