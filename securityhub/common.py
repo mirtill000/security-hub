@@ -66,8 +66,17 @@ class Parser(argparse.ArgumentParser):
         self.exit(EXIT_USAGE, f"{self.prog}: error: {message}\n")
 
 
-def atomic_write(path: str, text: str) -> None:
-    """Write `text` so that readers (a browser, a SIEM collector, a dashboard) never see a half-written file."""
+def _umask_mode() -> int:
+    old = os.umask(0)
+    os.umask(old)
+    return 0o666 & ~old
+
+
+def atomic_write(path: str, text: str, mode: Optional[int] = None) -> None:
+    """Write `text` so that readers (a browser, a SIEM collector, a dashboard) never see a half-written file.
+
+    The file gets `mode`, or the permissions a normal write would give (umask); never the 0600 of a temp file.
+    """
     folder = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(prefix=".tmp-", suffix=os.path.splitext(path)[1], dir=folder)
     try:
@@ -75,6 +84,7 @@ def atomic_write(path: str, text: str) -> None:
             f.write(text)
             f.flush()
             os.fsync(f.fileno())
+        os.chmod(tmp, _umask_mode() if mode is None else mode)
         os.replace(tmp, path)
     except BaseException:
         try:

@@ -1,0 +1,29 @@
+# /etc/systemd/system/securityhub.service - Security Hub daily assessment (started by securityhub.timer)
+[Unit]
+Description=Security Hub - security posture assessment
+Wants=network-online.target time-sync.target
+After=network-online.target time-sync.target
+
+[Service]
+Type=oneshot
+User=securityhub
+Group=securityhub
+EnvironmentFile=/etc/securityhub/env
+Environment=NO_COLOR=1
+UMask=0027
+WorkingDirectory=/opt/securityhub/config
+ExecStart=/opt/securityhub/venv/bin/securityhub run -q -c /opt/securityhub/config/securityhub.yaml
+# 2 = a score below fail_under: an assessment result, not a service failure
+SuccessExitStatus=2
+TimeoutStartSec=4h
+Nice=10
+# hardening: read-only system, writable only where the tool writes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+ReadWritePaths=/opt/securityhub/reports /opt/securityhub/.cache /var/www/html/securityhub

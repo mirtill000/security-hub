@@ -64,6 +64,8 @@ keep_runs: 12                            # older run folders are deleted (0 = ke
 # auto_baseline: true                    # compare every module with its previous run
 # max_parallel: 3                        # modules run at the same time (1 = one after the other)
 # max_age_days: {dns: 2, waf: 2, zta: 35}  # data older than this is flagged as stale in portal and summary
+# publish: /var/www/html/securityhub     # after each run copy the portal there as index.html (web server)
+#   or: publish: {dir: /var/www/html/securityhub, posture: true, mode: "0640"}
 # module_timeout: 3600                   # stop a module after this many seconds (per module: timeout)
 
 modules:
@@ -306,6 +308,45 @@ def run_module(name: str, argv: List[str], out_html: str, log_path: str, timeout
     return ModuleResult(name, code, seconds, report, error, argv, log_path)
 
 
+def parse_publish(value: Any, base_dir: str) -> Optional[dict]:
+    """'publish: /var/www/html/securityhub' or {dir: ..., posture: false, mode: "0644"}.
+
+    Only the portal (as index.html) and, if asked, posture.json are copied: never the run folders, JSON/CSV
+    exports or logs, which hold far more detail than a web page needs.
+    """
+    if value in (None, "", False):
+        return None
+    spec = {"dir": value} if isinstance(value, str) else value
+    if not isinstance(spec, dict) or not spec.get("dir"):
+        raise ConfigError("publish must be a folder, or a mapping with 'dir' (and optionally 'posture', 'mode')")
+    unknown = set(spec) - {"dir", "posture", "mode"}
+    if unknown:
+        raise ConfigError(f"publish: unknown option(s) {', '.join(sorted(unknown))} (known: dir, posture, mode)")
+    folder = _resolve(base_dir, str(spec["dir"]))
+    try:
+        mode = int(str(spec.get("mode", "0644")), 8)
+    except ValueError:
+        raise ConfigError("publish.mode must be octal, e.g. \"0644\" or \"0640\"")
+    if mode & 0o7133:
+        raise ConfigError("publish.mode must not make the files executable or writable by others (e.g. 0644 or 0640)")
+    if not os.path.isdir(folder):
+        raise ConfigError(f"publish folder does not exist: {folder} (create it and give the run user write access)")
+    return {"dir": folder, "posture": bool(spec.get("posture", False)), "mode": mode}
+
+
+def publish_outputs(publish: dict, hub: str, posture_file: str) -> List[str]:
+    """Copy the portal (index.html) and optionally posture.json to the web folder, atomically."""
+    pairs = [(hub, os.path.join(publish["dir"], "index.html"))]
+    if publish["posture"]:
+        pairs.append((posture_file, os.path.join(publish["dir"], "posture.json")))
+    done = []
+    for src, dst in pairs:
+        with open(src, encoding="utf-8") as f:
+            atomic_write(dst, f.read(), publish["mode"])
+        done.append(dst)
+    return done
+
+
 def _tail(path: str, n: int = 12) -> List[str]:
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
@@ -353,6 +394,8 @@ def run(config_path: str, only: Optional[List[str]] = None, dry_run: bool = Fals
     except (TypeError, ValueError):
         raise ConfigError("max_age_days values must be numbers")
 
+    publish = parse_publish(cfg.get("publish"), base_dir)
+
     previous = list_runs(out_dir)
     when = now or datetime.now(timezone.utc)
     stamp = when.strftime(RUN_FORMAT)
@@ -375,6 +418,9 @@ def run(config_path: str, only: Optional[List[str]] = None, dry_run: bool = Fals
     if dry_run:
         for name, _, argv, t in plans:  # no secrets: they are rejected from the configuration
             print(f"securityhub {name} {' '.join(argv)}" + (f"    # timeout {fmt_secs(t)}" if t else ""))
+        if publish:
+            print(f"# then publish the portal to {os.path.join(publish['dir'], 'index.html')}"
+                  + (" and posture.json" if publish["posture"] else ""))
         return EXIT_OK
 
     try:
@@ -383,7 +429,8 @@ def run(config_path: str, only: Optional[List[str]] = None, dry_run: bool = Fals
         say(err(f"Error: {e}. Wait for it to finish: the lock is released automatically when that run ends.", "red"))
         return EXIT_USAGE
     try:
-        return _execute(cfg, plans, out_dir, stamp, when, run_dir, parallel, max_age, fail_under, quiet, verbose, say, err)
+        return _execute(cfg, plans, out_dir, stamp, when, run_dir, parallel, max_age, fail_under, quiet, verbose, say, err,
+                        publish)
     finally:
         lock.__exit__(None, None, None)
 
@@ -400,7 +447,8 @@ def _claim_run_dir(out_dir: str, stamp: str, when: datetime) -> Tuple[str, str]:
             stamp = when.strftime(RUN_FORMAT)
 
 
-def _execute(cfg, plans, out_dir, stamp, when, run_dir, parallel, max_age, fail_under, quiet, verbose, say, err) -> int:
+def _execute(cfg, plans, out_dir, stamp, when, run_dir, parallel, max_age, fail_under, quiet, verbose, say, err,
+             publish=None) -> int:
     os.makedirs(os.path.join(out_dir, RUNS_DIR), exist_ok=True)
     claimed, stamp = _claim_run_dir(out_dir, stamp, when)
     if claimed != run_dir:  # the planned folder was taken meanwhile: move the outputs of every module
@@ -475,10 +523,18 @@ def _execute(cfg, plans, out_dir, stamp, when, run_dir, parallel, max_age, fail_
     out = Style(sys.stdout)
     print(f"\n{out('Portal ', 'bold')}  {out.link(hub)}\n{out('Summary', 'bold')}  {out.link(posture_file)}\n"
           f"{out('Logs   ', 'bold')}  {out.link(run_dir)}")
+    published_ok = True
+    if publish:
+        try:
+            for target in publish_outputs(publish, hub, posture_file):
+                print(f"{out('Published', 'bold')}  {target}")
+        except OSError as e:
+            published_ok = False
+            say(err(f"Error: cannot publish to {publish['dir']}: {e}", "red"))
 
     if any(r.code == EXIT_INTERRUPTED for r in ordered):
         return EXIT_INTERRUPTED
-    if any(r.code not in (EXIT_OK, EXIT_FAIL_UNDER) or r.error for r in ordered):
+    if not published_ok or any(r.code not in (EXIT_OK, EXIT_FAIL_UNDER) or r.error for r in ordered):
         return EXIT_USAGE
     if any(r.code == EXIT_FAIL_UNDER for r in ordered):
         return EXIT_FAIL_UNDER

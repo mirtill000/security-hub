@@ -176,6 +176,21 @@ La scelta è una sola per il portale e per tutti i report, viene ricordata dal b
 schede aperte ed è applicata prima del primo rendering, senza flash. Nel portale i report incorporati seguono il
 tema del portale. La stampa e il PDF executive usano sempre la versione chiara.
 
+## Pubblicazione su un web server
+
+Con `publish` nella configurazione, al termine di ogni `run` il portale viene copiato come `index.html` nella cartella
+del web server (scrittura atomica: chi apre la pagina non vede mai un file a metà):
+
+```yaml
+publish: /var/www/html/securityhub
+# oppure: publish: {dir: /var/www/html/securityhub, posture: true, mode: "0640"}
+```
+
+Viene pubblicato **solo il portale** (e `posture.json` se `posture: true`): mai le cartelle delle esecuzioni, gli export
+JSON/CSV o i log. La cartella deve esistere ed essere scrivibile dall'utente che esegue `run`. Il portale descrive i
+punti deboli dell'organizzazione: va protetto con autenticazione e, se possibile, limitato alla rete di gestione.
+In `deploy/raspberry-pi/` ci sono unità systemd (servizio + timer giornaliero) e la configurazione nginx d'esempio.
+
 ## Monitoraggio continuo
 
 `securityhub run` è pensato per girare a intervalli regolari. Gli exit code sono uguali per tutti i comandi:

@@ -1,0 +1,11 @@
+# /etc/systemd/system/securityhub.timer - one run per day
+[Unit]
+Description=Security Hub - daily run
+
+[Timer]
+OnCalendar=*-*-* 05:40
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
