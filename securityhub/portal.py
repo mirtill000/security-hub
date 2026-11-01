@@ -455,9 +455,34 @@ def subject_of(kind: str, payload: Optional[dict]) -> str:
     return ""
 
 
-def _read_report(path: str) -> Tuple[str, Optional[dict]]:
-    with open(path, "r", encoding="utf-8", errors="replace") as f:
-        text = f.read()
+# A run of 'securityhub run' keeps report *data* (<module>.report.json): the pages are rebuilt here, in the portal,
+# with the current UI. One HTML file in the end (the portal); history runs cost a few KB of data instead of pages.
+REPORT_DATA_SUFFIX = ".report.json"
+REPORT_DATA_FORMAT = "securityhub-report/1"
+
+
+def page_parts(kind: str) -> Tuple[str, str, str]:
+    """(template, css, js) of the report application of an area."""
+    if kind in DOMAIN_AREAS:
+        from .scanners.dns_email import report as m
+    elif kind == "waf":
+        from .scanners.waf import report as m
+    elif kind == "zta":
+        from .scanners import zero_trust as m
+    else:
+        raise ValueError(f"no report application for '{kind}'")
+    return m.REPORT_TEMPLATE, m.REPORT_CSS, m.REPORT_JS
+
+
+def build_page(kind: str, title: str, payload: dict) -> str:
+    """The self-contained report page, exactly as the module writes it."""
+    template, css, js = page_parts(kind)
+    return (template.replace("__TITLE__", html.escape(title)).replace("__CSS__", css).replace("__JS__", js)
+            .replace("__DATA__", json_for_html(payload)))
+
+
+def extract_report(text: str) -> Tuple[Optional[str], Optional[dict]]:
+    """(title, payload) of a report page."""
     m = DATA_RE.search(text)
     payload = None
     if m:
@@ -465,16 +490,44 @@ def _read_report(path: str) -> Tuple[str, Optional[dict]]:
             payload = json.loads(m.group(1))
         except ValueError:
             payload = None
-    return text, payload
+    tm = TITLE_RE.search(text)
+    return (html.unescape(tm.group(1).strip()) if tm else None), payload
+
+
+def compact_report(html_path: str) -> Optional[str]:
+    """Replace a report page with its data (<name>.report.json). Pages that are not Guard reports stay as they are."""
+    with open(html_path, "r", encoding="utf-8", errors="replace") as f:
+        title, payload = extract_report(f.read())
+    if payload is None:
+        return None
+    out = html_path.rsplit(".", 1)[0] + REPORT_DATA_SUFFIX
+    atomic_write(out, json.dumps({"format": REPORT_DATA_FORMAT, "title": title or "", "payload": payload},
+                                 ensure_ascii=False, separators=(",", ":")))
+    os.remove(html_path)
+    return out
+
+
+def _read_report(path: str, kind: Optional[str] = None) -> Tuple[str, Optional[dict], str]:
+    """(page, payload, title). Report data files are turned back into the page only when `kind` is given."""
+    if path.endswith(REPORT_DATA_SUFFIX):
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        payload, title = data.get("payload"), data.get("title") or os.path.basename(path)
+        text = build_page(kind, title, payload) if kind and payload is not None else ""
+        return text, payload, title
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        text = f.read()
+    title, payload = extract_report(text)
+    return text, payload, title or os.path.basename(path)
 
 
 def load_report(path: str, idx: int, keep: bool = True) -> dict:
     """Metadata, summary and executive metrics of a report; with keep=False the page and its parsed data are
     dropped right away (history runs only feed the KPI trends: keeping them would cost hundreds of MB)."""
-    text, payload = _read_report(path)
-    tm = TITLE_RE.search(text)
-    title = html.unescape(tm.group(1).strip()) if tm else os.path.basename(path)
+    text, payload, title = _read_report(path)
     kind = detect(payload, title)
+    if keep and path.endswith(REPORT_DATA_SUFFIX) and payload is not None:
+        text = build_page(kind, title, payload)
     summary: Dict[str, Any] = {"score": None, "kpis": [], "top": [], "subtitle": "", "generated": "", "delta": None}
     if payload is not None:
         try:
@@ -491,9 +544,13 @@ def load_report(path: str, idx: int, keep: bool = True) -> dict:
     if not summary.get("generated"):
         summary["generated"] = datetime.fromtimestamp(os.path.getmtime(path), timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     when = parse_date(summary.get("generated", "")) or datetime.fromtimestamp(os.path.getmtime(path), timezone.utc)
-    return {"id": f"r{idx}", "type": kind, "label": TYPE_LABEL[kind], "title": title, "file": os.path.basename(path),
+    name = os.path.basename(path)
+    if name.endswith(REPORT_DATA_SUFFIX):  # shown and downloaded as the page it becomes
+        name = name[:-len(REPORT_DATA_SUFFIX)] + ".html"
+    return {"id": f"r{idx}", "type": kind, "label": TYPE_LABEL[kind], "title": title, "file": name,
             "date": when.strftime("%Y-%m-%dT%H:%M:%SZ"), "subject": subject_of(kind, payload),
-            "size": len(text.encode("utf-8")), "grade": grade(summary["score"]), **summary, "path": path,
+            "size": len(text.encode("utf-8")) if text else os.path.getsize(path), "grade": grade(summary["score"]),
+            **summary, "path": path,
             **({"html": text, "payload": payload} if keep else {})}
 
 
@@ -503,7 +560,7 @@ def find_reports(inputs: List[str], include_all: bool) -> List[str]:
         if os.path.isdir(p):
             for root, _, names in os.walk(p):
                 for n in sorted(names):
-                    if n.lower().endswith((".html", ".htm")):
+                    if n.lower().endswith((".html", ".htm", REPORT_DATA_SUFFIX)):
                         files.append(os.path.join(root, n))
         elif os.path.isfile(p):
             files.append(p)
@@ -515,7 +572,7 @@ def find_reports(inputs: List[str], include_all: bool) -> List[str]:
         if real in seen:
             continue
         seen.add(real)
-        if not include_all and f not in inputs:
+        if not include_all and f not in inputs and not f.endswith(REPORT_DATA_SUFFIX):
             with open(f, "r", encoding="utf-8", errors="replace") as fh:
                 head = fh.read()
             if not DATA_RE.search(head):
@@ -621,7 +678,7 @@ def collect(inputs: List[str], include_all: bool = False, exclude: Optional[List
     loaded = [load_report(f, i, keep=False) for i, f in enumerate(files)]  # one report in memory at a time
     reports, history = split_history(loaded)
     for r in reports:  # only the latest run of each tool is embedded and correlated: load its page again
-        r["html"], r["payload"] = _read_report(r["path"])
+        r["html"], r["payload"], _ = _read_report(r["path"], r["type"])
     reports.sort(key=lambda r: (TYPE_ORDER[r["type"]], r["title"]))
     return reports, history
 

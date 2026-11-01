@@ -109,6 +109,6 @@ class SplitTest(TempDirTest):
         with silenced():
             orch.run(cfg, log=lambda m: None)
         run = orch.list_runs(self.path("out"))[0]
-        self.assertTrue({"email.html", "dns.html", "email.json", "dns.json", "dns.log"} <= set(os.listdir(run)))
+        self.assertTrue({"email.report.json", "dns.report.json", "email.json", "dns.json", "dns.log"} <= set(os.listdir(run)))
         with open(self.path("out", "posture.json"), encoding="utf-8") as f:
             self.assertEqual([a["area"] for a in json.load(f)["areas"]], ["email", "dns"])

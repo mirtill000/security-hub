@@ -81,7 +81,7 @@ class RunTest(TempDirTest):
         out = self.path("out")
         runs = orch.list_runs(out)
         self.assertEqual(len(runs), 2)
-        for name in ("waf.html", "waf.json", "waf.csv", "zta.html", "zta.json"):
+        for name in ("waf.report.json", "waf.json", "waf.csv", "zta.report.json", "zta.json"):
             self.assertTrue(os.path.isfile(os.path.join(runs[-1], name)), name)
         self.assertTrue(os.path.isfile(os.path.join(out, "security_hub.html")))
         with open(os.path.join(out, "posture.json"), encoding="utf-8") as f:
@@ -123,7 +123,7 @@ class RunTest(TempDirTest):
     def test_only(self):
         self.assertEqual(self.run_hub(self.config(), T0, only=["zta"]), EXIT_OK)
         files = sorted(os.listdir(orch.list_runs(self.path("out"))[0]))
-        self.assertEqual(files, ["zta.html", "zta.json", "zta.log"])
+        self.assertEqual(files, ["zta.json", "zta.log", "zta.report.json"])
         with self.assertRaises(orch.ConfigError):
             orch.run(self.config(), only=["dns"])
 

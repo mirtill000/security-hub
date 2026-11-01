@@ -510,10 +510,23 @@ def _execute(cfg, plans, out_dir, stamp, when, run_dir, parallel, max_age, fail_
         say(err("Error: no module produced a report; the portal was not updated.", "red"))
         return EXIT_USAGE
 
+    # One HTML in the end: the portal. Module pages become report data (<module>.report.json), in this run
+    # and in older runs still holding pages; the portal rebuilds the pages with the current UI.
+    from . import portal
+    for folder in list_runs(out_dir):
+        for n in sorted(os.listdir(folder)):
+            if n.lower().endswith(".html"):
+                try:
+                    data = portal.compact_report(os.path.join(folder, n))
+                except (OSError, ValueError) as e:
+                    say(err(f"Warning: {os.path.join(folder, n)} kept as a page ({e})", "yellow"))
+                    continue
+                for r in ordered:
+                    if r.report and os.path.realpath(r.report) == os.path.realpath(os.path.join(folder, n)) and data:
+                        r.report = data
     removed = prune_runs(out_dir, int(cfg.get("keep_runs", 12) or 0))
     if removed and not quiet:
         say(err(f"Removed {len(removed)} old run{'s' if len(removed) != 1 else ''} (keep_runs={cfg.get('keep_runs')})", "dim"))
-    from . import portal
     reports, history = portal.collect(list_runs(out_dir))
     hub = os.path.join(out_dir, "security_hub.html")
     portal.build_hub(reports, hub, str(cfg.get("title") or ""), history, max_age)

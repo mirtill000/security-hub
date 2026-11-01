@@ -39,7 +39,7 @@ Output di `securityhub run`:
 
 ```
 reports/
-  runs/2026-10-31T080000Z/   email.html email.json email.csv  dns.html dns.json dns.csv dns.log  waf.* waf.log  zta.* zta.log
+  runs/2026-10-31T080000Z/   dati di ogni modulo: <modulo>.report.json, .json, .csv, .log (nessuna pagina HTML)
   runs/2026-11-07T080000Z/   ...
   security_hub.html          <- portale: ultima esecuzione navigabile, le precedenti diventano trend dei KPI
   posture.json               <- riepilogo per monitoraggio / SIEM / CI
@@ -155,6 +155,15 @@ Ogni modulo gira **in un processo separato**: un errore o un blocco in un modulo
 partono insieme (`max_parallel`, default: tutti; `1` = in sequenza) e l'output di ciascuno va in `runs/<data>/<modulo>.log`.
 Con `module_timeout` (o `timeout` per singolo modulo) un modulo che supera il tempo viene fermato e segnalato.
 Se un modulo fallisce, la console mostra le ultime righe del suo log.
+
+## Un solo file HTML
+
+Con `securityhub run` l'unico HTML prodotto è il **portale** (`security_hub.html`, pubblicato come `index.html`): contiene
+tutte le aree (Email, DNS, WAF, Zero Trust) con i rispettivi report navigabili. Nelle cartelle delle esecuzioni ogni modulo
+lascia solo dati (`<modulo>.report.json` più export JSON/CSV e log); il portale ricostruisce le pagine dei report da quei
+dati con la grafica corrente (identiche a quelle che il modulo scriverebbe). Le esecuzioni precedenti che contengono ancora
+pagine HTML vengono convertite automaticamente al primo `run`. I comandi singoli (`securityhub dns|waf|zta`) continuano a
+scrivere il proprio report HTML.
 
 ## Report e-mail e report DNS
 
