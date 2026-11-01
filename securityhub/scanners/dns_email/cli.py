@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from collections import Counter
@@ -22,6 +23,7 @@ from .inputs import load_config, load_domains
 from .models import DomainResult
 from .rdap import RDAPClient
 from .report import generate_html_report
+from .views import email_output, view_checks, view_results, views_for
 
 _Parser = Parser
 
@@ -112,7 +114,11 @@ Exit codes: 0 ok, 1 usage/input/resolver error, 2 a domain scored below --fail-u
         """,
     )
     parser.add_argument("input_file", help="Text or CSV file with domains ('-' for stdin)")
-    parser.add_argument("-o", "--output", default="mailguard_dns_report.html", help="Output HTML file")
+    parser.add_argument("-o", "--output", default="dns_report.html",
+                        help="DNS security report (default: dns_report.html); the e-mail report is written next to it")
+    parser.add_argument("--email-output", help="E-mail security report (default: the output name with 'dns' replaced by "
+                                               "'email', e.g. dns_report.html -> email_report.html)")
+    parser.add_argument("--combined", action="store_true", help="One report with every check (as before version 4)")
     parser.add_argument("-c", "--checks", default="all",
                         help="Checks to run, comma-separated: " + ",".join(CHECKS) + ", all, full (default: all)")
     parser.add_argument("--skip", default="", help="Checks to exclude, e.g. --skip dkim,bimi")
@@ -286,29 +292,40 @@ def main(argv: Optional[List[str]] = None) -> int:
     stats_line = (f"{len(results)} domains in {elapsed:.1f}s, {st['queries']} DNS queries, {st['cache_hits']} cache hits, "
                   f"{st['coalesced']} coalesced, {st['retries']} retries, {st['errors']} DNS errors")
     results.sort(key=lambda x: (-x.priority, x.domain))
-
-    diff = None
-    if args.baseline:
-        try:
-            diff = compute_diff(results, args.baseline)
-        except (OSError, ValueError) as e:
-            print(f"Warning: baseline not used ({e})", file=sys.stderr)
     if rdap and rdap.note:
         notes.append(rdap.note)
+    base_meta = {"resolver": "System resolver" if args.system_resolver else f"Resolvers: {', '.join(nameservers)}",
+                 "stats": stats_line, "notes": notes, "unscanned_report_domains": unscanned}
 
-    meta = {"resolver": "System resolver" if args.system_resolver else f"Resolvers: {', '.join(nameservers)}",
-            "stats": stats_line, "checks": checks, "diff": diff, "notes": notes,
-            "unscanned_report_domains": unscanned}
+    # One scan, two reports (e-mail, DNS) unless --combined; a view without selected checks is not written.
+    if args.combined:
+        plan = [(None, results, checks, args.output)]
+    else:
+        plan = [(v, view_results(results, v, checks), view_checks(v, checks),
+                 args.output if v == "dns" else (args.email_output or email_output(args.output)))
+                for v in views_for(checks)]
+    written = []
     try:
-        generate_html_report(results, args.output, meta)
-        print(f"Report generated: {args.output}", file=sys.stderr)
-        base = args.output.rsplit(".", 1)[0]
-        if args.json:
-            write_json(results, base + ".json")
-            print(f"JSON output: {base}.json", file=sys.stderr)
-        if args.csv:
-            write_csv(results, base + ".csv")
-            print(f"CSV output: {base}.csv", file=sys.stderr)
+        for view, vres, vchecks, path in plan:
+            diff = None
+            baseline = args.baseline
+            if baseline and view == "email" and os.path.isfile(email_output(baseline)):
+                baseline = email_output(baseline)  # e-mail export of the previous run; else the given (older) one
+            if baseline:
+                try:
+                    diff = compute_diff(vres, baseline, view)
+                except (OSError, ValueError) as e:
+                    print(f"Warning: baseline not used for the {view or 'combined'} report ({e})", file=sys.stderr)
+            generate_html_report(vres, path, {**base_meta, "view": view, "checks": vchecks, "diff": diff})
+            print(f"Report generated: {path}", file=sys.stderr)
+            base = path.rsplit(".", 1)[0]
+            if args.json:
+                write_json(vres, base + ".json", view)
+                print(f"JSON output: {base}.json", file=sys.stderr)
+            if args.csv:
+                write_csv(vres, base + ".csv", view)
+                print(f"CSV output: {base}.csv", file=sys.stderr)
+            written.append((view, vres, diff))
     except OSError as e:
         print(f"Error: cannot write output: {e}", file=sys.stderr)
         return EXIT_USAGE
@@ -316,24 +333,27 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"\n{'=' * 56}\nSUMMARY{' (partial)' if interrupted else ''}\n{'=' * 56}")
     print(f"Checks:                   {checks_label}")
     print(f"Total domains analyzed:   {len(results)}")
-    print(f"Fully protected (>=80):   {sum(1 for r in results if r.overall_score >= 80)}")
-    print(f"Needs attention (50-79):  {sum(1 for r in results if 50 <= r.overall_score < 80)}")
-    print(f"Critical risk (<50):      {sum(1 for r in results if r.overall_score < 50)}")
     print(f"Non-mail domains:         {sum(1 for r in results if r.profile == 'non-mail')}")
-    if diff:
-        print(f"Since baseline:           {diff['improved']} improved, {diff['worsened']} worsened, "
-              f"{diff['new_critical']} new critical findings")
-    top = [r for r in results if r.priority > 0][:5]
-    if top:
-        print("Fix first:")
-        for r in top:
-            first = next((i for i in r.issues if i.severity == "critical"), r.issues[0] if r.issues else None)
-            print(f"  {r.domain:<36} score {r.overall_score:>3}  {first.message[:70] if first else ''}")
-    print(f"Stats: {stats_line}")
+    for view, vres, diff in written:
+        name = {"email": "E-MAIL", "dns": "DNS", None: "E-MAIL AND DNS"}[view]
+        print(f"\n{name}")
+        print(f"  Fully protected (>=80):   {sum(1 for r in vres if r.overall_score >= 80)}")
+        print(f"  Needs attention (50-79):  {sum(1 for r in vres if 50 <= r.overall_score < 80)}")
+        print(f"  Critical risk (<50):      {sum(1 for r in vres if r.overall_score < 50)}")
+        if diff:
+            print(f"  Since baseline:           {diff['improved']} improved, {diff['worsened']} worsened, "
+                  f"{diff['new_critical']} new critical findings")
+        top = [r for r in vres if r.priority > 0][:5]
+        if top:
+            print("  Fix first:")
+            for r in top:
+                first = next((i for i in r.issues if i.severity == "critical"), r.issues[0] if r.issues else None)
+                print(f"    {r.domain:<36} score {r.overall_score:>3}  {first.message[:66] if first else ''}")
+    print(f"\nStats: {stats_line}")
     print_timing_summary(results)
 
     if interrupted:
         return EXIT_INTERRUPTED
-    if args.fail_under is not None and any(r.overall_score < args.fail_under for r in results):
+    if args.fail_under is not None and any(r.overall_score < args.fail_under for _, vres, _ in written for r in vres):
         return EXIT_FAIL_UNDER
     return EXIT_OK

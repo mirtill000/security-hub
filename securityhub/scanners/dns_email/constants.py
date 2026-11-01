@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Set, Tuple
 
-__version__ = "3.1.0"
+__version__ = "4.0.0"
 USER_AGENT = f"MailGuardDNS/{__version__}"
 
 

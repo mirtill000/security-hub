@@ -1,6 +1,5 @@
 """Scan cost: two-round DKIM probing, cap on concurrent DNS queries, light portal history."""
 
-import json
 import os
 import threading
 import time
@@ -10,7 +9,7 @@ from securityhub import cli, orchestrator as orch, portal
 from securityhub.scanners import dns_email
 
 from .fakedns import OFFLINE_ARGS, fake_dns, load_zones
-from .helpers import TempDirTest, fixture, silenced
+from .helpers import TempDirTest, fixture, load_results, silenced
 
 
 class DkimRoundsTest(TempDirTest):
@@ -24,8 +23,7 @@ class DkimRoundsTest(TempDirTest):
                 return fake(self, name, rdtype, resolver)
             with mock.patch.object(dns_email.DNSClient, "_resolve", counting), silenced():
                 cli.main(["dns", fixture("domains.csv"), "-o", self.path("d.html"), "--json", "--checks", "dkim"] + OFFLINE_ARGS + list(extra))
-        with open(self.path("d.json"), encoding="utf-8") as f:
-            res = {r["domain"]: r["dkim"] for r in json.load(f)}
+        res = {r["domain"]: r["dkim"] for r in load_results(self.path("d_email.json"))}
         per = lambda d: sum(1 for c in calls if c.endswith("._domainkey." + d))
         return res, per
 
@@ -58,8 +56,7 @@ class DkimRoundsTest(TempDirTest):
         with fake_dns(zones), silenced():
             cli.main(["dns", fixture("domains.csv"), "-o", self.path("d.html"), "--json", "--checks", "dkim",
                       "--selectors", "corp2026"] + OFFLINE_ARGS)
-        with open(self.path("d.json"), encoding="utf-8") as f:
-            r = {x["domain"]: x["dkim"] for x in json.load(f)}["fabrikam.example"]
+        r = {x["domain"]: x["dkim"] for x in load_results(self.path("d_email.json"))}["fabrikam.example"]
         self.assertEqual((r["status"], r["stopped_early"]), ("valid", True))
 
 

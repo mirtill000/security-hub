@@ -37,7 +37,7 @@ from .console import Progress, Style, fmt_secs, print_posture
 
 # name -> (module, positional argument fed from `input`, human label)
 MODULES: Dict[str, Tuple[str, Optional[str], str]] = {
-    "dns": ("securityhub.scanners.dns_email", "input_file", "DNS / e-mail security (MailGuard DNS)"),
+    "dns": ("securityhub.scanners.dns_email", "input_file", "E-mail and DNS security (MailGuard)"),
     "waf": ("securityhub.scanners.waf", None, "Imperva Cloud WAF (WAFGuard)"),
     "zta": ("securityhub.scanners.zero_trust", "input", "Microsoft Zero Trust (ZTAGuard)"),
 }
@@ -63,7 +63,7 @@ keep_runs: 12                            # older run folders are deleted (0 = ke
 # fail_under: 70                         # exit code 2 if an area / asset scores below this
 # auto_baseline: true                    # compare every module with its previous run
 # max_parallel: 3                        # modules run at the same time (1 = one after the other)
-# max_age_days: {dns: 2, waf: 2, zta: 35}  # data older than this is flagged as stale in portal and summary
+# max_age_days: {email: 2, dns: 2, waf: 2, zta: 35}  # data older than this is flagged as stale in portal and summary
 # publish: /var/www/html/securityhub     # after each run copy the portal there as index.html (web server)
 #   or: publish: {dir: /var/www/html/securityhub, posture: true, mode: "0640"}
 # module_timeout: 3600                   # stop a module after this many seconds (per module: timeout)
@@ -305,6 +305,9 @@ def run_module(name: str, argv: List[str], out_html: str, log_path: str, timeout
         return ModuleResult(name, code, seconds, None, f"timed out after {fmt_secs(timeout)}", argv, log_path, True)
     if code < 0 or code == EXIT_INTERRUPTED:  # killed by a signal / interrupted
         code = EXIT_INTERRUPTED
+    if not os.path.isfile(out_html) and name == "dns":  # MailGuard writes dns.html and email.html: either one counts
+        from .scanners.dns_email.views import email_output
+        out_html = email_output(out_html)
     report = out_html if os.path.isfile(out_html) else None
     error = "" if report else "no report produced"
     return ModuleResult(name, code, seconds, report, error, argv, log_path)
@@ -389,8 +392,8 @@ def run(config_path: str, only: Optional[List[str]] = None, dry_run: bool = Fals
         raise ConfigError("max_parallel must be 1 or more")
     default_timeout = timeout if timeout is not None else cfg.get("module_timeout")
     max_age = cfg.get("max_age_days") or {}
-    if not isinstance(max_age, dict) or set(max_age) - set(ORDER):
-        raise ConfigError("max_age_days must map dns / waf / zta to a number of days")
+    if not isinstance(max_age, dict) or set(max_age) - {"email", "dns", "waf", "zta"}:
+        raise ConfigError("max_age_days must map email / dns / waf / zta to a number of days")
     try:
         max_age = {k: float(v) for k, v in max_age.items()}
     except (TypeError, ValueError):

@@ -5,7 +5,8 @@ Monitoraggio della **security posture** su tre aree, con un unico comando e un u
 | Area | Modulo | Cosa valuta | Sorgente dati |
 |------|--------|-------------|---------------|
 | **WAF** | `securityhub waf` (WAFGuard) | Configurazione Imperva Cloud WAF: onboarding, regole OWASP in blocco, eccezioni, allow-list, bot, DDoS, TLS, esposizione dell'origin | API Imperva (sola lettura) o snapshot JSON |
-| **DNS / E-mail** | `securityhub dns` (MailGuard DNS) | MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI, DNSSEC, CAA, takeover, zone transfer (AXFR, opt-in), lookalike, report DMARC aggregati | DNS live (+ RDAP, HTTPS per MTA-STS) |
+| **E-mail** | `securityhub dns` (MailGuard), report `email.html` | MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI, report DMARC aggregati | DNS live (+ HTTPS per MTA-STS) |
+| **DNS** | stessa scansione, report `dns.html` | DNSSEC, CAA, takeover delle dipendenze, scadenza registrazioni, zone transfer (AXFR, opt-in), coerenza resolver, lookalike | DNS live (+ RDAP) |
 | **Zero Trust** | `securityhub zta` (ZTAGuard) | Risultati del Microsoft Zero Trust Assessment per pilastro, priorità, quick win | `ZeroTrustAssessmentReport.json` |
 | **Portale** | `securityhub portal` (GuardHub) | Un solo file HTML con stato per area, KPI, piano d'azione trasversale, **vista per asset**, trend storici e i report navigabili | Report HTML generati dai moduli |
 
@@ -38,7 +39,7 @@ Output di `securityhub run`:
 
 ```
 reports/
-  runs/2026-10-31T080000Z/   dns.html dns.json dns.csv dns.log  waf.* waf.log  zta.* zta.log
+  runs/2026-10-31T080000Z/   email.html email.json email.csv  dns.html dns.json dns.csv dns.log  waf.* waf.log  zta.* zta.log
   runs/2026-11-07T080000Z/   ...
   security_hub.html          <- portale: ultima esecuzione navigabile, le precedenti diventano trend dei KPI
   posture.json               <- riepilogo per monitoraggio / SIEM / CI
@@ -154,6 +155,22 @@ Ogni modulo gira **in un processo separato**: un errore o un blocco in un modulo
 partono insieme (`max_parallel`, default: tutti; `1` = in sequenza) e l'output di ciascuno va in `runs/<data>/<modulo>.log`.
 Con `module_timeout` (o `timeout` per singolo modulo) un modulo che supera il tempo viene fermato e segnalato.
 Se un modulo fallisce, la console mostra le ultime righe del suo log.
+
+## Report e-mail e report DNS
+
+Il modulo `dns` esegue **una sola scansione** (il controllo di takeover usa SPF, DKIM e DMARC: due scansioni
+raddoppierebbero il traffico) e ne ricava **due report distinti**, ciascuno con i propri controlli, finding, punteggio,
+correzioni suggerite, export JSON/CSV e area nel portale:
+
+| Report | File | Controlli | Punteggio |
+|---|---|---|---|
+| **Email security** | `email.html` (`.json`, `.csv`) | MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI, report DMARC; requisiti Gmail/Yahoo e Microsoft | SPF 25, DKIM 25, DMARC 35, MTA-STS 7, TLS-RPT 3 (normalizzato a 100) |
+| **DNS security** | `dns.html` (`.json`, `.csv`) | DNSSEC, CAA, takeover e scadenza registrazioni, zone transfer, coerenza, lookalike | DNSSEC 30, CAA 25, takeover 30, zone transfer 15; i controlli non misurabili sono esclusi dal massimo |
+
+Da riga di comando: `-o dns.html` scrive il report DNS e, accanto, `email.html` (oppure `--email-output`). Se si
+selezionano solo controlli di un tipo (`--checks spf,dmarc`) viene scritto solo quel report. `--combined` produce un
+unico report come nelle versioni precedenti. Il primo confronto con una baseline combinata (versione 3) confronta solo
+i finding, non i punteggi: le scale sono diverse.
 
 ## Controlli DNS aggiuntivi
 

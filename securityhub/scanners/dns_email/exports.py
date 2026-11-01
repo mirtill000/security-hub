@@ -6,16 +6,19 @@ import csv
 import json
 from collections import Counter
 from dataclasses import asdict
-from typing import List
+from typing import Any, List, Optional
 
 from ...common import csv_safe
 from .models import DomainResult
 
 
-def write_json(results: List[DomainResult], path: str) -> None:
-    # Same top-level shape as v1/v2 (list of domain objects); new fields are additive.
+def write_json(results: List[DomainResult], path: str, view: Optional[str] = None) -> None:
+    """A list of domain objects (combined report, as in v1-v3) or {"view": ..., "results": [...]} for a view."""
+    data: Any = [asdict(r) for r in results]
+    if view:
+        data = {"view": view, "results": data}
     with open(path, "w", encoding="utf-8") as f:
-        json.dump([asdict(r) for r in results], f, indent=2, ensure_ascii=False)
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
 
 CSV_EXPORT_COLUMNS = [
@@ -27,10 +30,19 @@ CSV_EXPORT_COLUMNS = [
 ]
 
 
-def write_csv(results: List[DomainResult], path: str) -> None:
+# Columns that belong to only one view (the others are common: domain, score, tier, findings...)
+EMAIL_COLUMNS = {"mx_status", "mx_providers", "spf_status", "spf_all", "spf_lookups", "spf_void_lookups", "dkim_status",
+                 "dkim_selectors", "dmarc_status", "dmarc_policy", "dmarc_sp", "dmarc_pct", "dmarc_rua", "mta_sts_mode",
+                 "tls_rpt", "bimi", "gmail_yahoo", "microsoft", "dmarc_enforcement"}
+DNS_COLUMNS = {"dnssec", "caa", "caa_issuers", "takeover", "axfr", "lookalikes_with_mx"}
+
+
+def write_csv(results: List[DomainResult], path: str, view: Optional[str] = None) -> None:
+    drop = DNS_COLUMNS if view == "email" else EMAIL_COLUMNS if view == "dns" else set()
+    keep = [i for i, c in enumerate(CSV_EXPORT_COLUMNS) if c not in drop]
     with open(path, "w", newline="", encoding="utf-8-sig") as f:  # BOM so Excel opens it as UTF-8
         w = csv.writer(f, delimiter=";")
-        w.writerow(CSV_EXPORT_COLUMNS)
+        w.writerow([CSV_EXPORT_COLUMNS[i] for i in keep])
         for r in results:
             sev = Counter(i.severity for i in r.issues)
             row = [
@@ -46,4 +58,4 @@ def write_csv(results: List[DomainResult], path: str) -> None:
                 "" if not r.change or r.change.get("score_delta") is None else r.change["score_delta"],
                 sev["critical"], sev["warning"], sev["info"], "|".join(i.code for i in r.issues),
             ]
-            w.writerow([csv_safe(v) for v in row])
+            w.writerow([csv_safe(row[i]) for i in keep])

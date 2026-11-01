@@ -4,16 +4,24 @@ from __future__ import annotations
 
 import json
 import os
-from typing import List, Set
+from typing import List, Optional, Set
 
 from .constants import CHECK_ATTRS
 from .models import DomainResult
 
 
-def compute_diff(results: List[DomainResult], baseline_path: str) -> dict:
+def compute_diff(results: List[DomainResult], baseline_path: str, view: Optional[str] = None) -> dict:
     with open(baseline_path, encoding="utf-8") as f:
         raw = json.load(f)
     items = raw.get("results", raw) if isinstance(raw, dict) else raw
+    base_view = raw.get("view") if isinstance(raw, dict) else None
+    # an export of another view (or an older combined one): compare findings of this view only, not scores
+    same_scale = (base_view or None) == (view or None)
+    if view:
+        from .views import issue_in_view
+        for d in items:
+            if isinstance(d, dict):
+                d["issues"] = [i for i in d.get("issues") or [] if issue_in_view(i.get("code"), view)]
     base = {str(d.get("domain", "")).lower(): d for d in items if isinstance(d, dict)}
     base_date = max((str(d.get("scan_date", "")) for d in base.values()), default="")
 
@@ -31,7 +39,7 @@ def compute_diff(results: List[DomainResult], baseline_path: str) -> dict:
                         "new_issues": [], "resolved_issues": []}
             summary["new_domains"].append(r.domain)
             continue
-        delta = r.overall_score - int(b.get("overall_score") or 0)
+        delta = r.overall_score - int(b.get("overall_score") or 0) if same_scale else 0
         status_changes = []
         for check, attr in CHECK_ATTRS.items():
             before = (b.get(attr) or {}).get("status")
@@ -45,7 +53,8 @@ def compute_diff(results: List[DomainResult], baseline_path: str) -> dict:
         crit_codes = {i.code for i in r.issues if i.severity == "critical"}
         summary["new_critical"] += len(crit_codes & set(new_issues))
         changed = bool(delta or status_changes or new_issues or resolved)
-        r.change = {"new": False, "changed": changed, "score_delta": delta, "previous_score": b.get("overall_score"),
+        r.change = {"new": False, "changed": changed, "score_delta": delta if same_scale else None,
+                    "previous_score": b.get("overall_score") if same_scale else None,
                     "status_changes": status_changes, "new_issues": new_issues, "resolved_issues": resolved}
         key = "improved" if delta > 0 else "worsened" if delta < 0 else "unchanged"
         summary[key] += 1

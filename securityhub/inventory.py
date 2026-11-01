@@ -103,7 +103,7 @@ def _first(issues: List[dict]) -> str:
     return (i or {}).get("message", "")
 
 
-def _dns_item(r: dict, report: str) -> dict:
+def _dns_item(r: dict, report: str, dns_report: Optional[str] = None) -> dict:
     dmarc = r.get("dmarc") or {}
     state = dmarc_state(r)
     measured = dns_measured(r)
@@ -119,7 +119,8 @@ def _dns_item(r: dict, report: str) -> dict:
             "dnssec": (r.get("dnssec") or {}).get("status"), "takeover": (r.get("takeover") or {}).get("status"),
             "registration_expires": (r.get("takeover") or {}).get("domain_expires"),
             "critical": sum(i.get("severity") == "critical" for i in r.get("issues") or []),
-            "main": _first(r.get("issues")), "report": report, "hash": "#/domains?d=" + str(r.get("domain"))}
+            "main": _first(r.get("issues")), "report": report, "dns_report": dns_report or report,
+            "hash": "#/domains?d=" + str(r.get("domain"))}
 
 
 def _waf_item(r: dict, report: str) -> dict:
@@ -134,6 +135,24 @@ def _waf_item(r: dict, report: str) -> dict:
             "served_cert_days": tls.get("served_cert_days"),
             "critical": sum(i.get("severity") == "critical" for i in r.get("issues") or []),
             "main": _first(r.get("issues")), "report": report, "hash": "#/domains?d=" + str(r.get("domain"))}
+
+
+DNS_FIELDS = ("dnssec", "caa", "takeover", "axfr", "consistency", "lookalikes")
+
+
+def _merge_domain(parts: Dict[str, Tuple[dict, str]]) -> Tuple[dict, str, str]:
+    """One row per domain from its e-mail and DNS rows (either may be missing, e.g. an older combined report)."""
+    email, dns = parts.get("email"), parts.get("dns")
+    if not (email and dns):
+        row, rid = email or dns
+        return row, rid, rid
+    row = dict(email[0])
+    for k in DNS_FIELDS:
+        row[k] = dns[0].get(k)
+    row["issues"] = list(email[0].get("issues") or []) + list(dns[0].get("issues") or [])
+    scores = [x.get("overall_score") for x in (email[0], dns[0]) if x.get("overall_score") is not None]
+    row["overall_score"] = min(scores) if scores else None
+    return row, email[1], dns[1]
 
 
 def _signal(sev: str, code: str, text: str, report: Optional[str] = None, hash_: str = "") -> dict:
@@ -160,9 +179,9 @@ def _signals(asset: dict, now: datetime) -> List[dict]:
     for d in dns:
         if d["axfr_open"]:
             out.append(_signal("critical", "DNS_AXFR_OPEN", f"{d['domain']}: zone transfer allowed by {', '.join(d['axfr_open'])}",
-                               d["report"], d["hash"]))
+                               d["dns_report"], d["hash"]))
         if d["takeover"] == "error":
-            out.append(_signal("critical", "DNS_TAKEOVER", f"{d['domain']}: a dependency can be taken over (unregistered or dangling)", d["report"], d["hash"]))
+            out.append(_signal("critical", "DNS_TAKEOVER", f"{d['domain']}: a dependency can be taken over (unregistered or dangling)", d["dns_report"], d["hash"]))
         if d in spoofable and not (unprotected and d is spoofable[0]):
             sev = "critical" if d["tier"] in ("critical", "high") and d["profile"] == "mail" else "warning"
             out.append(_signal(sev, "MAIL_SPOOFABLE", f"{d['domain']} can be impersonated by e-mail (DMARC {d['dmarc']})", d["report"], d["hash"]))
@@ -179,7 +198,7 @@ def _signals(asset: dict, now: datetime) -> List[dict]:
     if web and any(d["caa"] == "missing" for d in dns):
         d = next(d for d in dns if d["caa"] == "missing")
         out.append(_signal("warning", "WEB_NO_CAA", f"{d['domain']} publishes websites but no CAA record: any certificate "
-                                                    "authority may issue certificates for it", d["report"], d["hash"]))
+                                                    "authority may issue certificates for it", d["dns_report"], d["hash"]))
     unknown = [d["domain"] for d in dns if not d["measured"] or d["dmarc_state"] == "unknown"] + \
               [w["domain"] for w in web if not w["measured"] or w["protected"] is None]
     if unknown:
@@ -200,23 +219,28 @@ def build(reports: List[dict], now: Optional[datetime] = None) -> dict:
     `reports` are the portal's report dicts with their parsed `payload`.
     """
     now = now or datetime.now(timezone.utc)
-    dns_rows: List[Tuple[dict, str]] = []
+    dns_rows: List[Tuple[dict, str, str]] = []
+    split: Dict[str, Dict[str, Tuple[dict, str]]] = {}
     waf_rows: List[Tuple[dict, str]] = []
     tenants: List[Tuple[dict, dict]] = []
     for r in reports:
         p = r.get("payload")
         if not isinstance(p, dict):
             continue
-        if r["type"] == "dns":
-            dns_rows += [(x, r["id"]) for x in p.get("results") or [] if x.get("domain")]
+        if r["type"] in ("email", "dns"):  # MailGuard 4: one scan, an e-mail and a DNS report - merged per domain
+            for x in p.get("results") or []:
+                if x.get("domain"):
+                    split.setdefault(str(x["domain"]).lower(), {})[r["type"]] = (x, r["id"])
         elif r["type"] == "waf":
             waf_rows += [(x, r["id"]) for x in p.get("results") or [] if x.get("domain")]
         elif r["type"] == "zta":
             tenants.append((p.get("tenant") or {}, r))
+    for parts in split.values():
+        dns_rows.append(_merge_domain(parts))
     if not dns_rows and not waf_rows:
         return {"assets": [], "summary": {"total": 0}}
 
-    listed = sorted({str(x["domain"]).lower() for x, _ in dns_rows}, key=lambda d: (d.count("."), d))
+    listed = sorted({str(x["domain"]).lower() for x, _, _ in dns_rows}, key=lambda d: (d.count("."), d))
     roots: Dict[str, str] = {}
     for d in listed:  # shortest listed parent wins
         roots[d] = next((p for p in listed if _under(d, p) and p.count(".") < d.count(".")), d)
@@ -226,8 +250,8 @@ def build(reports: List[dict], now: Optional[datetime] = None) -> dict:
     def asset(key: str) -> dict:
         return assets.setdefault(key, {"key": key, "dns": [], "web": [], "tenant": None, "expiries": []})
 
-    for x, rid in dns_rows:
-        asset(roots[str(x["domain"]).lower()])["dns"].append(_dns_item(x, rid))
+    for x, rid, dns_rid in dns_rows:
+        asset(roots[str(x["domain"]).lower()])["dns"].append(_dns_item(x, rid, dns_rid))
     for x, rid in waf_rows:
         host = str(x["domain"]).lower()
         match = max((d for d in listed if _under(host, d)), key=len, default=None)
@@ -253,7 +277,7 @@ def build(reports: List[dict], now: Optional[datetime] = None) -> dict:
             if d["registration_expires"]:
                 a["expiries"].append({"kind": "registration", "name": d["domain"], "date": str(d["registration_expires"])[:10],
                                       "days": _days_until(d["registration_expires"], now), "source": "RDAP",
-                                      "report": d["report"], "hash": d["hash"]})
+                                      "report": d["dns_report"], "hash": d["hash"]})
         a["expiries"].sort(key=lambda e: (e["days"] is None, e["days"] if e["days"] is not None else 0))
         a["dns_assessed"] = bool(dns_rows)
         a["signals"] = _signals(a, now)

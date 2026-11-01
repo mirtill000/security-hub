@@ -1,6 +1,5 @@
 """CAA and zone transfer (AXFR) checks of the DNS module."""
 
-import json
 import unittest
 from unittest import mock
 
@@ -9,7 +8,7 @@ from securityhub.scanners import dns_email
 from securityhub.scanners.dns_email import parse_checks
 
 from .fakedns import OFFLINE_ARGS, fake_dns, load_zones
-from .helpers import TempDirTest, fixture, silenced
+from .helpers import TempDirTest, fixture, load_results, silenced
 
 
 class Answer:
@@ -21,8 +20,7 @@ class DnsHygieneTest(TempDirTest):
     def scan(self, checks="all,axfr", zones=None):
         with silenced(), fake_dns(zones):
             cli.main(["dns", fixture("domains.csv"), "-o", self.path("dns.html"), "--json", "--csv", "--checks", checks] + OFFLINE_ARGS)
-        with open(self.path("dns.json"), encoding="utf-8") as f:
-            return {r["domain"]: r for r in json.load(f)}
+        return {r["domain"]: r for r in load_results(self.path("dns.json"))}
 
     def test_checks_selection(self):
         self.assertIn("caa", parse_checks("all"))
@@ -50,8 +48,7 @@ class DnsHygieneTest(TempDirTest):
             f.write("mail.contoso.example\nfabrikam.example\ncontoso-old.example\n")
         with silenced(), fake_dns(zones):
             cli.main(["dns", self.path("d.txt"), "-o", self.path("dns.html"), "--json", "--checks", "caa"] + OFFLINE_ARGS)
-        with open(self.path("dns.json"), encoding="utf-8") as f:
-            r = {x["domain"]: x for x in json.load(f)}
+        r = {x["domain"]: x for x in load_results(self.path("dns.json"))}
         self.assertEqual(r["mail.contoso.example"]["caa"]["inherited_from"], "contoso.example")
         self.assertEqual(r["fabrikam.example"]["caa"]["status"], "warning")
         self.assertIn("CAA_INVALID", [i["code"] for i in r["fabrikam.example"]["caa"]["issues"]])
@@ -63,7 +60,11 @@ class DnsHygieneTest(TempDirTest):
         self.assertIn("AXFR_OPEN", [i["code"] for i in r["fabrikam.example"]["issues"]])
         self.assertEqual(r["contoso.example"]["axfr"]["status"], "valid")
         self.assertEqual({s["result"] for s in r["contoso.example"]["axfr"]["servers"]}, {"refused"})
-        self.assertEqual(r["fabrikam.example"]["overall_score"], self.scan("all")["fabrikam.example"]["overall_score"])  # weight 0
+        # the e-mail score does not depend on DNS checks
+        email = lambda: {x["domain"]: x["overall_score"] for x in load_results(self.path("email.json"))}
+        before = email()
+        self.scan("all")
+        self.assertEqual(email(), before)
 
     def test_axfr_probe_reads_only_the_first_message(self):
         client = dns_email.DNSClient(["127.0.0.1"], timeout=1)
@@ -82,7 +83,8 @@ class DnsHygieneTest(TempDirTest):
         dns = next(r for r in reps if r["type"] == "dns")
         side = {k: v for k, v, _ in dns["exec"]["side"]}
         self.assertEqual(side["Zone transfer open to anyone"], "1 domain")
-        self.assertEqual(side["Certificate issuance restricted (CAA)"], "2 of 3")
+        kpi = {k["key"]: k for k in dns["exec"]["kpis"]}
+        self.assertEqual((kpi["caa"]["value"], kpi["caa"]["detail"]), (67, "2 of 3 verified domains"))
         signals = {a["key"]: {s["code"] for s in a["signals"]} for a in inventory.build(reps)["assets"]}
         self.assertIn("DNS_AXFR_OPEN", signals["fabrikam.example"])
         self.assertIn("WEB_NO_CAA", signals["fabrikam.example"])

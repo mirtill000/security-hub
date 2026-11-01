@@ -27,13 +27,15 @@ class UnknownIsNotExposedTest(TempDirTest):
         with silenced():  # resolver that never answers: every domain unreachable
             cli.main(["dns", fixture("domains.csv"), "-o", self.path("dns.html"), "--skip-preflight", "--offline",
                       "--no-http", "--nameservers", "127.0.0.1", "-t", "0.2", "-q"])
-        r = collect(self.path("dns.html"))[0]
+        r = collect(self.path("email.html"))[0]
         self.assertIsNone(r["exec"]["headline"])
         self.assertEqual(r["exec"]["status"], "unknown")
+        d = collect(self.path("dns.html"))[0]  # the DNS report says the same: nothing verified, nothing exposed
+        self.assertEqual((d["type"], d["exec"]["status"], d["exec"]["headline"]), ("dns", "unknown", None))
         self.assertIsNone(r["score"])
         self.assertIsNone(r["exec"]["kpis"][0]["value"])
         self.assertIn("3 not verified", r["exec"]["kpis"][0]["detail"])
-        inv = inventory.build([r])
+        inv = inventory.build([r, d])
         self.assertEqual({a["status"] for a in inv["assets"]}, {"unknown"})
         codes = {s["code"] for a in inv["assets"] for s in a["signals"]}
         self.assertEqual(codes, {"DATA_INCOMPLETE"})
@@ -41,7 +43,7 @@ class UnknownIsNotExposedTest(TempDirTest):
     def test_b2_dmarc_not_checked_is_not_spoofing(self):
         with silenced(), fake_dns():
             cli.main(["dns", fixture("domains.csv"), "-o", self.path("dns.html"), "--checks", "spf"] + OFFLINE_ARGS)
-        r = collect(self.path("dns.html"))[0]
+        r = collect(self.path("email.html"))[0]
         self.assertIsNone(r["exec"]["kpis"][0]["value"])
         self.assertIn("not checked", r["exec"]["kpis"][0]["detail"])
         self.assertIsNone(r["exec"]["headline"])
@@ -126,7 +128,7 @@ class FreshnessTest(TempDirTest):
             self.assertEqual(cli.main(["status", self.path("zta.html"), "--max-age", "nope=1"]), EXIT_USAGE)
             cli.main(["portal", self.path("zta.html"), "-o", self.path("hub.html"), "--max-age", "zta=7"])
         with open(self.path("hub.html"), encoding="utf-8") as f:
-            self.assertIn('"max_age_days":{"dns":2,"waf":2,"zta":7.0}', f.read())
+            self.assertIn('"max_age_days":{"email":2,"dns":2,"waf":2,"zta":7.0}', f.read())
 
 
 class ConcurrencyTest(TempDirTest):

@@ -12,7 +12,7 @@ from securityhub import orchestrator as orch
 from securityhub.common import EXIT_FAIL_UNDER, EXIT_OK, EXIT_USAGE
 from securityhub.scanners import waf
 
-from .helpers import TempDirTest, fixture, silenced
+from .helpers import TempDirTest, fixture, load_results, silenced
 
 T0 = datetime(2026, 10, 1, 8, 0, tzinfo=timezone.utc)
 
@@ -170,8 +170,9 @@ class DnsRunTest(TempDirTest):
             code = orch.run(p, now=T0, log=lambda m: None)
         self.assertIn(code, (EXIT_OK, EXIT_FAIL_UNDER))
         run = orch.list_runs(self.path("out"))[0]
-        with open(os.path.join(run, "dns.json"), encoding="utf-8") as f:
-            self.assertEqual(sorted(r["domain"] for r in json.load(f)), ["contoso-old.example", "contoso.example", "fabrikam.example"])
+        self.assertEqual(sorted(r["domain"] for r in load_results(os.path.join(run, "email.json"))),
+                         ["contoso-old.example", "contoso.example", "fabrikam.example"])
+        self.assertFalse(os.path.exists(os.path.join(run, "dns.json")))  # no DNS check selected: no DNS report
 
 
 class ParallelTest(TempDirTest):

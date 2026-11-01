@@ -12,6 +12,14 @@ def fixture(name: str) -> str:
     return os.path.join(FIXTURES, name)
 
 
+def load_results(path: str) -> list:
+    """Rows of a MailGuard JSON export: a list (combined) or {"view": ..., "results": [...]} (e-mail / DNS report)."""
+    import json
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    return data["results"] if isinstance(data, dict) else data
+
+
 class TempDirTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="securityhub-test-")

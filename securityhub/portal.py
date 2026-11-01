@@ -37,12 +37,14 @@ __version__ = "1.2.0"
 
 DATA_RE = re.compile(r'<script type="application/json" id="mg-data">(.*?)</script>', re.S)
 TITLE_RE = re.compile(r"<title>(.*?)</title>", re.S | re.I)
-TYPE_ORDER = {"dns": 0, "waf": 1, "zta": 2, "other": 3}
-TYPE_LABEL = {"dns": "Email and DNS security", "waf": "Imperva Cloud WAF", "zta": "Microsoft Zero Trust", "other": "Report"}
+TYPE_ORDER = {"email": 0, "dns": 1, "waf": 2, "zta": 3, "other": 4}
+TYPE_LABEL = {"email": "Email security", "dns": "DNS security", "waf": "Imperva Cloud WAF", "zta": "Microsoft Zero Trust",
+              "other": "Report"}
+DOMAIN_AREAS = ("email", "dns")  # reports whose rows are domains (MailGuard: one scan, two reports)
 TIER_W = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 # Data older than this (days) is flagged as stale: DNS and WAF can be assessed daily, the Zero Trust
 # Assessment is a periodic export. Override with --max-age / max_age_days in the configuration.
-MAX_AGE_DAYS = {"dns": 2, "waf": 2, "zta": 35}
+MAX_AGE_DAYS = {"email": 2, "dns": 2, "waf": 2, "zta": 35}
 STATUS_RANK = {"bad": 0, "warn": 1, "good": 2}
 
 
@@ -60,9 +62,11 @@ def detect(payload: Optional[dict], title: str) -> str:
         if (payload.get("meta") or {}).get("tool") == "WAFGuard" or "account_issues" in payload:
             return "waf"
         if isinstance(payload.get("results"), list) and "checks" in payload:
-            return "dns"
+            # MailGuard 4 writes an e-mail and a DNS report; older combined reports read as e-mail (their KPIs were)
+            return "dns" if (payload.get("meta") or {}).get("view") == "dns" else "email"
     t = title.lower()
-    return "zta" if "zero trust" in t else "waf" if "waf" in t else "dns" if "email security" in t else "other"
+    return ("zta" if "zero trust" in t else "waf" if "waf" in t else "dns" if "dns security" in t
+            else "email" if "email" in t else "other")
 
 
 def first_issue(r: dict) -> str:
@@ -74,10 +78,10 @@ def first_issue(r: dict) -> str:
 def summarize_assets(kind: str, payload: dict) -> dict:
     rows = payload.get("results") or []
     tiers = payload.get("tiers") or TIER_W
-    measured = [r for r in rows if (inventory.dns_measured(r) if kind == "dns" else inventory.waf_measured(r))]
+    measured = [r for r in rows if (inventory.dns_measured(r) if kind in DOMAIN_AREAS else inventory.waf_measured(r))]
     avg = weighted_avg(measured, tiers)
     sev = Counter(i.get("severity") for r in rows for i in r.get("issues") or [])
-    noun = "domains" if kind == "dns" else "websites"
+    noun = "domains" if kind in DOMAIN_AREAS else "websites"
     kpis = [[len(rows), f"{noun} assessed"], *([[len(rows) - len(measured), "not verified (errors)", "warn"]] if len(measured) < len(rows) else []),
             [sum(r.get("overall_score", 0) >= 80 for r in rows), "well protected (80+)", "pass"],
             [sum(r.get("overall_score", 0) < 50 for r in measured), "at critical risk (under 50)", "fail"],
@@ -88,7 +92,7 @@ def summarize_assets(kind: str, payload: dict) -> dict:
             kpis.append([bypass, "in bypass mode", "fail"])
         if payload.get("account_issues"):
             kpis.append([len(payload["account_issues"]), "account findings", "warn"])
-    else:
+    elif kind == "email":
         nonmail = sum(r.get("profile") == "non-mail" for r in rows)
         if nonmail:
             kpis.append([nonmail, "do not handle mail", ""])
@@ -242,8 +246,8 @@ def _asset_actions(kind: str, payload: dict, rows: List[dict]) -> List[dict]:
     return sorted(out, key=lambda a: (-a["impact"], a["severity"] != "critical", a["code"]))
 
 
-def exec_dns(payload: dict) -> dict:
-    """E-mail/DNS outcomes. Only measured domains count: not checked or failed lookups are 'not verified', never 'exposed'."""
+def exec_email(payload: dict) -> dict:
+    """E-mail outcomes. Only measured domains count: not checked or failed lookups are 'not verified', never 'exposed'."""
     rows = [r for r in payload.get("results") or [] if r.get("profile") != "nonexistent"]
     checks = payload.get("checks") or []
     measured = [r for r in rows if inventory.dns_measured(r)]
@@ -255,10 +259,10 @@ def exec_dns(payload: dict) -> dict:
     crit = [r for r in known if r.get("tier") == "critical"]
     note = f", {unverified} not verified" if unverified else ""
     if "dmarc" not in checks:
-        spoof_kpi = _kpi("spoof", "Domains protected against spoofing", None, "%", "DMARC was not checked in this assessment", 100, area="dns")
+        spoof_kpi = _kpi("spoof", "Domains protected against spoofing", None, "%", "DMARC was not checked in this assessment", 100, area="email")
     else:
         spoof_kpi = _kpi("spoof", "Domains protected against spoofing", _pct(len(enforced), len(known)), "%",
-                         f"{len(enforced)} of {len(known)} verified domains enforce DMARC{note}", 100, area="dns",
+                         f"{len(enforced)} of {len(known)} verified domains enforce DMARC{note}", 100, area="email",
                          hash_="#/domains?comp=dmarc_enforcement:fail")
     kpis = [spoof_kpi]
     side = []
@@ -268,19 +272,6 @@ def exec_dns(payload: dict) -> dict:
         ok = sum(states[id(r)] == "enforced" for r in crit)
         side.append(["Critical-tier domains protected", f"{ok} of {len(crit)}", "good" if ok == len(crit) else "bad"])
     exposure = False
-    if "takeover" in checks:
-        tk = [r for r in measured if (r.get("takeover") or {}).get("status") == "error"]
-        exposure = bool(tk)
-        side.append(["Exposed to takeover of a dependency", f"{len(tk)} domain{'' if len(tk) == 1 else 's'}", "bad" if tk else "good"])
-    if "axfr" in checks:
-        ax = [r for r in measured if (r.get("axfr") or {}).get("status") == "error"]
-        exposure = exposure or bool(ax)
-        side.append(["Zone transfer open to anyone", f"{len(ax)} domain{'' if len(ax) == 1 else 's'}", "bad" if ax else "good"])
-    if "caa" in checks:
-        caa = [r for r in measured if (r.get("caa") or {}).get("status") in ("valid", "warning", "missing")]
-        ok = sum((r.get("caa") or {}).get("status") != "missing" for r in caa)
-        if caa:
-            side.append(["Certificate issuance restricted (CAA)", f"{ok} of {len(caa)}", "good" if ok == len(caa) else "warn"])
     mail = [r for r in measured if r.get("profile") == "mail" and (r.get("dkim") or {}).get("status") not in inventory.UNKNOWN_STATUSES]
     if mail and "dkim" in checks:
         signed = sum((r.get("dkim") or {}).get("status") in ("valid", "partial") for r in mail)
@@ -292,9 +283,70 @@ def exec_dns(payload: dict) -> dict:
     trend = round(sum(deltas) / len(deltas), 1) if deltas else None
     worst = _pct(len(spoofable), len(known))
     return {"status": _status(score, exposure), "kpis": kpis, "side": side, "trend": trend,
-            "actions": _asset_actions("dns", payload, measured),
+            "actions": _asset_actions("email", payload, measured),
             "headline": (worst, f"{len(spoofable)} of {len(known)} verified domains ({worst}%) can be impersonated by email")
             if spoofable else None}
+
+
+def exec_dns(payload: dict) -> dict:
+    """DNS outcomes: zone integrity (DNSSEC), certificate issuance (CAA), takeover, zone transfer, registrations.
+    Only measured domains count: a check that was not run or failed is 'not verified', never 'exposed'."""
+    rows = [r for r in payload.get("results") or [] if r.get("profile") != "nonexistent"]
+    checks = payload.get("checks") or []
+    measured = [r for r in rows if inventory.dns_measured(r)]
+    st = lambda r, c: (r.get(c) or {}).get("status")
+    codes = lambda r: {i.get("code") for i in r.get("issues") or []}
+    plural = lambda n: f"{n} domain{'' if n == 1 else 's'}"
+    unverified = len(rows) - len(measured)
+    note = f", {unverified} not verified" if unverified else ""
+    kpis, side = [], []
+    if "dnssec" in checks:
+        known = [r for r in measured if st(r, "dnssec") in ("valid", "missing", "bogus")]
+        signed = sum(st(r, "dnssec") == "valid" for r in known)
+        kpis.append(_kpi("dnssec", "Domains signed with DNSSEC", _pct(signed, len(known)) if known else None, "%",
+                         f"{signed} of {len(known)} verified domains{note}" if known else "DNSSEC could not be verified "
+                         "(the resolver does not validate)", 100, area="dns", hash_="#/domains?finding=DNSSEC_UNSIGNED"))
+    if "caa" in checks:
+        known = [r for r in measured if st(r, "caa") in ("valid", "warning", "missing")]
+        ok = sum(st(r, "caa") != "missing" for r in known)
+        kpis.append(_kpi("caa", "Domains restricting certificate issuance (CAA)", _pct(ok, len(known)) if known else None, "%",
+                         f"{ok} of {len(known)} verified domains{note}", 100, area="dns", hash_="#/domains?finding=CAA_MISSING"))
+    tk = [r for r in measured if st(r, "takeover") == "error"] if "takeover" in checks else []
+    ax = [r for r in measured if st(r, "axfr") == "error"] if "axfr" in checks else []
+    bogus = [r for r in measured if st(r, "dnssec") == "bogus"]
+    expired = [r for r in rows if codes(r) & {"DOMAIN_EXPIRED"}]
+    expiring = [r for r in rows if codes(r) & {"DOMAIN_EXPIRING"}]
+    if "takeover" in checks:
+        side.append(["Exposed to takeover of a dependency", plural(len(tk)), "bad" if tk else "good"])
+        side.append(["Registrations expired or expiring", plural(len(expired) + len(expiring)),
+                     "bad" if expired else "warn" if expiring else "good"])
+    if "axfr" in checks:
+        side.append(["Zone transfer open to anyone", plural(len(ax)), "bad" if ax else "good"])
+    if bogus:
+        side.append(["DNSSEC broken (bogus signatures)", plural(len(bogus)), "bad"])
+    if "consistency" in checks:
+        inc = sum(st(r, "consistency") in ("warning", "error") for r in measured)
+        side.append(["Resolvers and name servers disagree", plural(inc), "warn" if inc else "good"])
+    if "lookalikes" in checks:
+        lk = sum(any(e.get("mx") for e in (r.get("lookalikes") or {}).get("registered") or []) for r in measured)
+        side.append(["Brands with lookalike domains able to receive mail", str(lk), "warn" if lk else "good"])
+    if unverified:
+        side.append(["Not verified (DNS errors)", plural(unverified), "warn"])
+    score = weighted_avg(measured, payload.get("tiers") or TIER_W)
+    deltas = [r["change"]["score_delta"] for r in measured if r.get("change") and r["change"].get("score_delta") is not None]
+    exposure = bool(tk or ax or bogus or expired)
+    head = None
+    if tk:
+        head = (_pct(len(tk), len(measured)), f"{len(tk)} of {len(measured)} domains can be taken over through an "
+                                              "unregistered or dangling dependency")
+    elif ax:
+        head = (_pct(len(ax), len(measured)), f"{plural(len(ax))} let anyone download the whole DNS zone")
+    elif bogus or expired:
+        head = (_pct(len(bogus) + len(expired), len(measured)),
+                f"{plural(len(bogus) + len(expired))} at risk of going offline (broken DNSSEC or expired registration)")
+    return {"status": _status(score, exposure), "kpis": kpis, "side": side,
+            "trend": round(sum(deltas) / len(deltas), 1) if deltas else None,
+            "actions": _asset_actions("dns", payload, measured), "headline": head}
 
 
 def exec_waf(payload: dict) -> dict:
@@ -426,13 +478,14 @@ def load_report(path: str, idx: int, keep: bool = True) -> dict:
     summary: Dict[str, Any] = {"score": None, "kpis": [], "top": [], "subtitle": "", "generated": "", "delta": None}
     if payload is not None:
         try:
-            summary = summarize_zta(payload) if kind == "zta" else summarize_assets(kind, payload) if kind in ("dns", "waf") else summary
+            summary = (summarize_zta(payload) if kind == "zta" else
+                       summarize_assets(kind, payload) if kind in ("email", "dns", "waf") else summary)
         except Exception as e:  # never fail the hub because of one report
             print(f"Warning: summary of {os.path.basename(path)} not available ({type(e).__name__}: {e})", file=sys.stderr)
     summary["exec"] = None
-    if payload is not None and kind in ("dns", "waf", "zta"):
+    if payload is not None and kind in ("email", "dns", "waf", "zta"):
         try:
-            summary["exec"] = {"dns": exec_dns, "waf": exec_waf, "zta": exec_zta}[kind](payload)
+            summary["exec"] = {"email": exec_email, "dns": exec_dns, "waf": exec_waf, "zta": exec_zta}[kind](payload)
         except Exception as e:
             print(f"Warning: executive metrics of {os.path.basename(path)} not available ({type(e).__name__}: {e})", file=sys.stderr)
     if not summary.get("generated"):
@@ -579,7 +632,7 @@ def parse_max_age(text: str) -> Dict[str, float]:
     for part in filter(None, (p.strip() for p in (text or "").split(","))):
         k, _, v = part.partition("=")
         if k.strip() not in MAX_AGE_DAYS or not v:
-            raise ValueError(f"invalid max age '{part}' (expected e.g. dns=2,waf=2,zta=35)")
+            raise ValueError(f"invalid max age '{part}' (expected e.g. email=2,dns=2,waf=2,zta=35)")
         out[k.strip()] = float(v)
     return out
 

@@ -8,6 +8,8 @@
 const D = JSON.parse(document.getElementById('mg-data').textContent);
 const R = D.results, CHECKS = D.checks, L = D.labels, ATTR = D.attrs, M = D.meta || {};
 const FIND = D.findings, FW = D.frameworks, COMP = D.compliance;
+const VIEW = M.view || 'combined', TITLE = M.title || 'Email security posture';
+const TOOL = {email: 'MailGuard Email', dns: 'MailGuard DNS'}[VIEW] || 'MailGuard DNS';
 const ESC = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'};
 const $ = (s, r) => (r || document).querySelector(s);
 const SEV = {critical: 0, warning: 1, info: 2};
@@ -136,7 +138,7 @@ function side() {
   const live = R.filter(r => r.profile !== 'nonexistent');
   const avg = weighted(live, r => r.overall_score), g = gradeOf(avg);
   const visible = ROUTES.filter(x => x.show());
-  return `<div class="brand"><div class="brand-mark">${icon('shield', 18)}</div><div><b>MailGuard DNS</b><small>Email security posture</small></div></div>
+  return `<div class="brand"><div class="brand-mark">${icon('shield', 18)}</div><div><b>${esc(TOOL)}</b><small>${esc(TITLE)}</small></div></div>
     <button class="posture" data-route="overview" title="Portfolio grade"><span class="letter g-${g}">${g}</span>
       <span><b class="num">${avg.toFixed(0)}/100</b><br>${R.length} domains</span></button>
     <nav class="nav" aria-label="Sections">${visible.map((x, k) => {
@@ -172,7 +174,7 @@ function overview() {
   const hi = R.filter(r => r.overall_score >= 80).length, mid = R.filter(r => r.overall_score >= 50 && r.overall_score < 80).length;
   const nonmail = R.filter(r => r.profile === 'non-mail').length, unreach = R.filter(r => r.profile === 'unreachable').length;
   const kpi = (val, label, cls, attrs) => `<button class="kpi ${cls || ''}" ${attrs}><b>${val}</b><span>${esc(label)}</span></button>`;
-  let h = `<div class="print-head"><h1>Email security posture</h1><p class="muted">${R.length} domains, scanned ${esc(M.generated || '')}</p></div>
+  let h = `<div class="print-head"><h1>${esc(TITLE)}</h1><p class="muted">${R.length} domains, scanned ${esc(M.generated || '')}</p></div>
   <div class="ov-top">
     <section class="card grade-card" aria-label="Portfolio grade">
       <div class="letter g-${g}">${g}</div><div class="lbl">Portfolio grade</div>
@@ -184,7 +186,7 @@ function overview() {
       ${kpi(hi, 'fully protected, 80+', 'k-pass', 'data-filter="score" data-value="hi"')}
       ${kpi(mid, 'need attention, 50 to 79', 'k-warn', 'data-filter="score" data-value="mid"')}
       ${kpi(n - hi - mid, 'critical risk, under 50', 'k-fail', 'data-filter="score" data-value="lo"')}
-      ${nonmail ? kpi(nonmail, 'do not handle mail', '', 'data-filter="profile" data-value="non-mail"') : ''}
+      ${nonmail && VIEW !== 'dns' ? kpi(nonmail, 'do not handle mail', '', 'data-filter="profile" data-value="non-mail"') : ''}
       ${unreach ? kpi(unreach, 'DNS unreachable', '', 'data-filter="profile" data-value="unreachable"') : ''}
     </section>
   </div><div class="ov-grid">`;
@@ -370,7 +372,7 @@ function tabOverview(r) {
   h += sec('controls', 'Controls', `<div class="ctl-grid">${CHECKS.filter(c => vis(r, c)).map(c => `<button class="ctl" data-dtab="${tabFor(c)}" data-anchor="${c}"><span>${esc(L[c])}</span>${pill(r._st(c), DETAIL[c] ? DETAIL[c](r) : '')}</button>`).join('')}</div>`);
   if (r.change && r.change.changed) {
     const c = r.change;
-    h += sec('changes', 'Since the baseline', c.new ? '<p>New domain in this scan.</p>' : `<p>Score <span class="num">${esc(c.previous_score)}</span> to ${scoreHtml(r.overall_score)} ${deltaHtml(r)}</p>
+    h += sec('changes', 'Since the baseline', c.new ? '<p>New domain in this scan.</p>' : `${c.previous_score === null || c.previous_score === undefined ? '' : `<p>Score <span class="num">${esc(c.previous_score)}</span> to ${scoreHtml(r.overall_score)} ${deltaHtml(r)}</p>`}
       ${c.status_changes.map(s => `<div style="margin-top:6px">${esc(L[s.check] || s.check)} ${pill(s.from)} ${pill(s.to)}</div>`).join('')}
       ${c.new_issues.length ? `<p style="margin-top:10px"><b>New:</b> ${c.new_issues.map(x => esc(findingTitle(x))).join(', ')}</p>` : ''}
       ${c.resolved_issues.length ? `<p style="margin-top:6px"><b>Resolved:</b> ${c.resolved_issues.map(x => esc(findingTitle(x))).join(', ')}</p>` : ''}`);
@@ -526,7 +528,7 @@ function showKeys() {
 }
 function showAbout() {
   const w = D.weights || {};
-  dialog('About this scan', `<div class="kv" style="margin-bottom:16px">${kv('Generated', M.generated)}${kv('Tool', 'MailGuard DNS ' + (M.version || ''))}${kv('Domains', R.length)}${kv('Resolvers', M.resolver)}</div>
+  dialog('About this scan', `<div class="kv" style="margin-bottom:16px">${kv('Generated', M.generated)}${kv('Tool', TOOL + ' ' + (M.version || ''))}${kv('Domains', R.length)}${kv('Resolvers', M.resolver)}</div>
     <p style="margin-bottom:6px"><b>Checks</b></p><p class="muted" style="margin-bottom:14px">${CHECKS.map(c => esc(L[c]) + (w[c] ? ` (${w[c]} pts)` : '')).join(', ')}</p>
     <p style="margin-bottom:6px"><b>Notes</b></p><ul style="margin:0;padding-left:18px;color:var(--muted)">${(M.notes || []).map(n => `<li style="margin-bottom:4px">${esc(n)}</li>`).join('')}</ul>`);
 }
@@ -556,7 +558,7 @@ function render() {
   $('#view').innerHTML = view();
   drawer();
   const rt = ROUTES.find(x => x.id === S.route);
-  document.title = (S.open !== null ? R[S.open].domain + ' - ' : '') + (rt ? rt.label + ' - ' : '') + 'MailGuard DNS';
+  document.title = (S.open !== null ? R[S.open].domain + ' - ' : '') + (rt ? rt.label + ' - ' : '') + TOOL;
 }
 /* ================= events ================= */
 document.addEventListener('click', e => {
