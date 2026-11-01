@@ -25,7 +25,8 @@ class UnknownIsNotExposedTest(TempDirTest):
 
     def test_b1_dns_outage_is_not_spoofing(self):
         with silenced():  # resolver that never answers: every domain unreachable
-            cli.main(["dns", fixture("domains.csv"), "-o", self.path("dns.html"), "--skip-preflight", "--offline",
+            cli.main(["dns", fixture("domains.csv"), "-o", self.path("dns.html"), "--email-output", self.path("email.html"),
+                      "--skip-preflight", "--offline",
                       "--no-http", "--nameservers", "127.0.0.1", "-t", "0.2", "-q"])
         r = collect(self.path("email.html"))[0]
         self.assertIsNone(r["exec"]["headline"])
@@ -42,7 +43,7 @@ class UnknownIsNotExposedTest(TempDirTest):
 
     def test_b2_dmarc_not_checked_is_not_spoofing(self):
         with silenced(), fake_dns():
-            cli.main(["dns", fixture("domains.csv"), "-o", self.path("dns.html"), "--checks", "spf"] + OFFLINE_ARGS)
+            cli.main(["email", fixture("domains.csv"), "-o", self.path("email.html"), "--checks", "spf"] + OFFLINE_ARGS)
         r = collect(self.path("email.html"))[0]
         self.assertIsNone(r["exec"]["kpis"][0]["value"])
         self.assertIn("not checked", r["exec"]["kpis"][0]["detail"])

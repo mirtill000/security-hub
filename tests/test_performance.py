@@ -22,8 +22,8 @@ class DkimRoundsTest(TempDirTest):
                 calls.append(name)
                 return fake(self, name, rdtype, resolver)
             with mock.patch.object(dns_email.DNSClient, "_resolve", counting), silenced():
-                cli.main(["dns", fixture("domains.csv"), "-o", self.path("d.html"), "--json", "--checks", "dkim"] + OFFLINE_ARGS + list(extra))
-        res = {r["domain"]: r["dkim"] for r in load_results(self.path("d_email.json"))}
+                cli.main(["email", fixture("domains.csv"), "-o", self.path("d.html"), "--json", "--checks", "dkim"] + OFFLINE_ARGS + list(extra))
+        res = {r["domain"]: r["dkim"] for r in load_results(self.path("d.json"))}
         per = lambda d: sum(1 for c in calls if c.endswith("._domainkey." + d))
         return res, per
 
@@ -54,9 +54,9 @@ class DkimRoundsTest(TempDirTest):
         zones["fabrikam.example"]["MX"] = [[10, "mx.fabrikam.example"]]
         zones["corp2026._domainkey.fabrikam.example"] = {"TXT": zones["selector1._domainkey.contoso.example"]["TXT"]}
         with fake_dns(zones), silenced():
-            cli.main(["dns", fixture("domains.csv"), "-o", self.path("d.html"), "--json", "--checks", "dkim",
+            cli.main(["email", fixture("domains.csv"), "-o", self.path("d.html"), "--json", "--checks", "dkim",
                       "--selectors", "corp2026"] + OFFLINE_ARGS)
-        r = {x["domain"]: x["dkim"] for x in load_results(self.path("d_email.json"))}["fabrikam.example"]
+        r = {x["domain"]: x["dkim"] for x in load_results(self.path("d.json"))}["fabrikam.example"]
         self.assertEqual((r["status"], r["stopped_early"]), ("valid", True))
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import time
 from collections import Counter
@@ -13,7 +14,7 @@ from typing import Dict, List, Optional
 from ...common import EXIT_FAIL_UNDER, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, Parser
 from .analyzer import EmailSecurityAnalyzer
 from .baseline import compute_diff
-from .constants import (CHECKS, CHECK_LABELS, DEFAULT_CHECKS, DEFAULT_DKIM_SELECTORS, TIER_ALIASES, __version__,
+from .constants import (CHECK_ALIASES, CHECKS, CHECK_LABELS, DEFAULT_CHECKS, DEFAULT_DKIM_SELECTORS, TIER_ALIASES, __version__,
                         parse_checks)
 from .dmarc_reports import load_dmarc_reports
 from .dnsclient import DNSClient, preflight
@@ -23,7 +24,7 @@ from .inputs import load_config, load_domains
 from .models import DomainResult
 from .rdap import RDAPClient
 from .report import generate_html_report
-from .views import email_output, view_checks, view_results, views_for
+from .views import VIEWS, email_output, view_checks, view_results, views_for
 
 _Parser = Parser
 
@@ -90,35 +91,52 @@ def print_timing_summary(results: List[DomainResult], top: int = 5) -> None:
         print(f"Unreachable name servers: {unreachable} domain(s) - checks skipped after retries")
 
 
-def build_parser() -> _Parser:
-    parser = _Parser(
-        description="Email security posture of a domain portfolio via live DNS "
-                    "(MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI, DNSSEC, takeover, consistency, lookalikes)",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-    securityhub dns domains.txt
-    securityhub dns portfolio.csv -o report.html --json --csv
-    securityhub dns domains.txt --checks spf,dmarc,takeover
-    securityhub dns domains.txt --checks all,lookalikes --lookalike-tiers critical,high
-    securityhub dns domains.txt --dmarc-reports ./rua/ --baseline previous.json
-    securityhub dns domains.txt --config mailguard.yaml --profile weekly
+COMMANDS = {
+    "email": {
+        "description": "E-mail security of a domain portfolio via live DNS (MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI, "
+                       "DMARC aggregate reports)",
+        "output": "email_report.html",
+        "checks": "mx, spf, dkim, dmarc, mta-sts, tls-rpt, bimi (= 'all', the default)",
+    },
+    "dns": {
+        "description": "DNS security of a domain portfolio via live DNS (DNSSEC, CAA, dependency takeover and "
+                       "registrations, zone transfer, resolver consistency, lookalike domains)",
+        "output": "dns_report.html",
+        "checks": "dnssec, caa, takeover (= 'all', the default), plus the opt-in axfr (active zone transfer test), "
+                  "consistency and lookalikes ('full' = everything)",
+    },
+}
 
-Checks: mx, spf, dkim, dmarc, mta-sts, tls-rpt, bimi, dnssec, takeover (= 'all', the default),
-        plus the opt-in consistency and lookalikes ('full' = everything). Combine: --checks all,lookalikes
-Input: text (one domain per line; URLs/e-mails accepted; '#' comments) or CSV with a 'domain' column
-       and optional tier (critical/high/medium/low), owner, bu, tags (separated by |).
+
+def build_parser(command: str = "dns") -> _Parser:
+    c = COMMANDS[command]
+    parser = _Parser(
+        description=c["description"],
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f"""
+Examples:
+    securityhub {command} domains.txt
+    securityhub {command} portfolio.csv -o report.html --json --csv
+    securityhub {command} domains.txt --baseline previous.json
+    securityhub {command} domains.txt --config mailguard.yaml --profile weekly
+""" + ("""    securityhub email domains.txt --checks spf,dmarc --dmarc-reports ./rua/
+""" if command == "email" else """    securityhub dns domains.txt --checks all,axfr,lookalikes --lookalike-tiers critical,high
+""") + f"""
+Checks: {c["checks"]}. Combine: --checks all,<check>
+Input: a plain list (one domain per line; URLs/e-mails accepted; '#' comments) or CSV with optional
+       tier (critical/high/medium/low), owner, bu, tags (separated by |).
 Config: JSON or YAML with option names as keys (e.g. checks, workers, nameservers) and optional
-        'profiles: {name: {...}}' selected with --profile. Command-line options override it.
+        'profiles: {{name: {{...}}}}' selected with --profile. Command-line options override it.
 Exit codes: 0 ok, 1 usage/input/resolver error, 2 a domain scored below --fail-under, 130 interrupted.
         """,
     )
     parser.add_argument("input_file", help="Text or CSV file with domains ('-' for stdin)")
-    parser.add_argument("-o", "--output", default="dns_report.html",
-                        help="DNS security report (default: dns_report.html); the e-mail report is written next to it")
-    parser.add_argument("--email-output", help="E-mail security report (default: the output name with 'dns' replaced by "
-                                               "'email', e.g. dns_report.html -> email_report.html)")
-    parser.add_argument("--combined", action="store_true", help="One report with every check (as before version 4)")
+    parser.add_argument("-o", "--output", default=c["output"], help=f"Output HTML report (default: {c['output']})")
+    if command == "dns":
+        # used by 'securityhub run' to assess e-mail and DNS with one scan: also write the e-mail report there
+        parser.add_argument("--email-output", help=argparse.SUPPRESS)
+        parser.add_argument("--combined", action="store_true",
+                            help="One report with every e-mail and DNS check (as before version 4)")
     parser.add_argument("-c", "--checks", default="all",
                         help="Checks to run, comma-separated: " + ",".join(CHECKS) + ", all, full (default: all)")
     parser.add_argument("--skip", default="", help="Checks to exclude, e.g. --skip dkim,bimi")
@@ -160,8 +178,8 @@ Exit codes: 0 ok, 1 usage/input/resolver error, 2 a domain scored below --fail-u
     return parser
 
 
-def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
-    parser = build_parser()
+def parse_arguments(argv: Optional[List[str]] = None, command: str = "dns") -> argparse.Namespace:
+    parser = build_parser(command)
     args = parser.parse_args(argv)
     if args.config:
         try:
@@ -179,11 +197,30 @@ def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
     return args
 
 
-def main(argv: Optional[List[str]] = None) -> int:
-    args = parse_arguments(argv)
-    parser = build_parser()
+def main_email(argv: Optional[List[str]] = None) -> int:
+    """securityhub email: e-mail checks only, one report."""
+    return main(argv, "email")
+
+
+def main(argv: Optional[List[str]] = None, command: str = "dns") -> int:
+    """securityhub dns: DNS checks only, one report (with --email-output: e-mail too, from the same scan)."""
+    args = parse_arguments(argv, command)
+    parser = build_parser(command)
+    email_output_path = getattr(args, "email_output", None)
+    combined = getattr(args, "combined", False)
     try:
         checks = parse_checks(args.checks, args.skip)
+        if command == "email" or not (email_output_path or combined):
+            scope = VIEWS[command]["checks"]
+            other = "dns" if command == "email" else "email"
+            named = [CHECK_ALIASES.get(t, t) for t in re.split(r"[,\s]+", args.checks.strip().lower()) if t]
+            wrong = [t for t in named if t in VIEWS[other]["checks"]]
+            if wrong:
+                raise ValueError(f"{', '.join(wrong)}: {'e-mail' if other == 'email' else 'DNS'} check(s), "
+                                 f"use 'securityhub {other}'")
+            checks = [c for c in checks if c in scope]
+            if not checks:
+                raise ValueError("no checks left to run")
     except ValueError as e:
         parser.error(str(e))
 
@@ -298,18 +335,19 @@ def main(argv: Optional[List[str]] = None) -> int:
                  "stats": stats_line, "notes": notes, "unscanned_report_domains": unscanned}
 
     # One scan, two reports (e-mail, DNS) unless --combined; a view without selected checks is not written.
-    if args.combined:
+    if combined:
         plan = [(None, results, checks, args.output)]
     else:
+        names = views_for(checks) if email_output_path else [command]
         plan = [(v, view_results(results, v, checks), view_checks(v, checks),
-                 args.output if v == "dns" else (args.email_output or email_output(args.output)))
-                for v in views_for(checks)]
+                 email_output_path if (v == "email" and command == "dns") else args.output)
+                for v in names]
     written = []
     try:
         for view, vres, vchecks, path in plan:
             diff = None
             baseline = args.baseline
-            if baseline and view == "email" and os.path.isfile(email_output(baseline)):
+            if baseline and view == "email" and command == "dns" and os.path.isfile(email_output(baseline)):
                 baseline = email_output(baseline)  # e-mail export of the previous run; else the given (older) one
             if baseline:
                 try:

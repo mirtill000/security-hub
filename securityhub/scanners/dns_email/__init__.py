@@ -169,6 +169,8 @@ from .report import (
     generate_html_report,
 )
 from .cli import (
+    COMMANDS,
+    main_email,
     Progress,
     build_parser,
     main,
@@ -177,6 +179,8 @@ from .cli import (
 )
 
 __all__ = [
+    'COMMANDS',
+    'main_email',
     'DKIM_FIRST_ROUND',
     'DKIM_PROVIDER_SELECTORS',
     'AXFRResult',

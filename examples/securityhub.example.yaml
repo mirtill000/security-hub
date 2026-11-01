@@ -13,19 +13,27 @@ keep_runs: 12                            # older run folders are deleted (0 = ke
 # module_timeout: 3600                   # stop a module after this many seconds (per module: timeout)
 
 modules:
-  # E-mail and DNS security of a domain portfolio (needs: pip install dnspython)
+  # E-mail and DNS security of a domain portfolio (needs: pip install dnspython).
+  # On the same input, email and dns are assessed with ONE scan (two reports): options they share must match.
+  email:
+    enabled: true
+    input: domains.csv                   # a plain list of domains is enough; tier/owner/bu/tags columns are optional
+    options:
+      checks: all                        # mx, spf, dkim, dmarc, mta-sts, tls-rpt, bimi
+      csv: true
+      # dmarc_reports: [./rua]           # DMARC aggregate reports (.xml/.gz/.zip/.eml)
+      # full_dkim: true                  # probe every DKIM selector (complete audit, slower; e.g. once a month)
+
   dns:
     enabled: true
     # timeout: 7200                      # large portfolios with lookalikes can take long
-    input: domains.csv                   # a plain list of domains is enough; tier/owner/bu/tags columns are optional
+    input: domains.csv
     options:
-      checks: all,takeover               # add axfr (active zone transfer test), lookalikes, consistency
+      checks: all                        # dnssec, caa, takeover; add axfr (active test), lookalikes, consistency
       csv: true
-      # dmarc_reports: [./rua]           # DMARC aggregate reports (.xml/.gz/.zip/.eml)
-      # nameservers: [1.1.1.1, 8.8.8.8]
-      # qps: 50                         # max DNS queries per second (default: unlimited)
-      # max_inflight: 32               # max DNS queries on the wire at once (default 32: router friendly)
-      # full_dkim: true                # probe every DKIM selector (complete audit, slower; e.g. once a month)
+      # nameservers: [1.1.1.1, 8.8.8.8]  # shared with email: set the same value in both, or the scans are separate
+      # qps: 50                          # max DNS queries per second (default: unlimited)
+      # max_inflight: 32                 # max DNS queries on the wire at once (default 32: router friendly)
 
   # Imperva Cloud WAF configuration (read-only API calls)
   # Credentials: export IMPERVA_API_ID=... IMPERVA_API_KEY=...  (never in this file)

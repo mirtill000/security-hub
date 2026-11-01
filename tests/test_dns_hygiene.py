@@ -19,7 +19,8 @@ class Answer:
 class DnsHygieneTest(TempDirTest):
     def scan(self, checks="all,axfr", zones=None):
         with silenced(), fake_dns(zones):
-            cli.main(["dns", fixture("domains.csv"), "-o", self.path("dns.html"), "--json", "--csv", "--checks", checks] + OFFLINE_ARGS)
+            cli.main(["dns", fixture("domains.csv"), "-o", self.path("dns.html"), "--email-output", self.path("email.html"),
+                      "--json", "--csv", "--checks", checks] + OFFLINE_ARGS)
         return {r["domain"]: r for r in load_results(self.path("dns.json"))}
 
     def test_checks_selection(self):

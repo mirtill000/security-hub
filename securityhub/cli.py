@@ -3,7 +3,8 @@
     securityhub run      [-c securityhub.yaml]    run every enabled module, update portal + posture.json
     securityhub status   <output_dir|reports...>  print the current posture (or --json)
     securityhub init     [securityhub.yaml]       write an example configuration
-    securityhub dns      <domains> [options]      e-mail and DNS security (MailGuard DNS)
+    securityhub email    <domains> [options]      e-mail security: MX, SPF, DKIM, DMARC... (MailGuard)
+    securityhub dns      <domains> [options]      DNS security: DNSSEC, CAA, takeover, AXFR... (MailGuard)
     securityhub waf      --account-id N [options] Imperva Cloud WAF posture (WAFGuard)
     securityhub zta      <report folder> [opts]   Microsoft Zero Trust Assessment (ZTAGuard)
     securityhub portal   <reports...> [options]   combine reports into one portal (GuardHub)
@@ -23,13 +24,15 @@ from typing import List, Optional
 from . import __version__
 from .common import EXIT_OK, EXIT_USAGE, Parser
 
+# command -> (module, entry point, description)
 TOOLS = {
-    "dns": ("securityhub.scanners.dns_email", "E-mail and DNS security of a domain portfolio (MailGuard DNS)"),
-    "waf": ("securityhub.scanners.waf", "Imperva Cloud WAF configuration assessment (WAFGuard)"),
-    "zta": ("securityhub.scanners.zero_trust", "Microsoft Zero Trust Assessment report (ZTAGuard)"),
-    "portal": ("securityhub.portal", "Combine reports into one navigable portal (GuardHub)"),
+    "email": ("securityhub.scanners.dns_email", "main_email", "E-mail security of a domain portfolio: MX, SPF, DKIM, DMARC... (MailGuard)"),
+    "dns": ("securityhub.scanners.dns_email", "main", "DNS security of a domain portfolio: DNSSEC, CAA, takeover, AXFR... (MailGuard)"),
+    "waf": ("securityhub.scanners.waf", "main", "Imperva Cloud WAF configuration assessment (WAFGuard)"),
+    "zta": ("securityhub.scanners.zero_trust", "main", "Microsoft Zero Trust Assessment report (ZTAGuard)"),
+    "portal": ("securityhub.portal", "main", "Combine reports into one navigable portal (GuardHub)"),
 }
-ALIASES = {"mail": "dns", "email": "dns", "zt": "zta", "zerotrust": "zta", "hub": "portal"}
+ALIASES = {"mail": "email", "e-mail": "email", "zt": "zta", "zerotrust": "zta", "hub": "portal"}
 DEFAULT_CONFIG = "securityhub.yaml"
 
 
@@ -39,7 +42,7 @@ def _usage() -> str:
              "  run       Run the enabled modules from a configuration file, update the portal and posture.json",
              "  status    Print the current posture from an output folder or from reports",
              "  init      Write an example configuration file"]
-    lines += [f"  {k:<9} {v[1]}" for k, v in TOOLS.items()]
+    lines += [f"  {k:<9} {v[2]}" for k, v in TOOLS.items()]
     lines += ["", "Run 'securityhub <command> --help' for the options of a command."]
     return "\n".join(lines)
 
@@ -126,23 +129,26 @@ def main(argv: Optional[List[str]] = None) -> int:
         return EXIT_USAGE
     _set_prog(mod, f"securityhub {cmd}")
     try:
-        return mod.main(rest)
+        return getattr(mod, TOOLS[cmd][1])(rest)
     except SystemExit as e:
         return e.code if isinstance(e.code, int) else EXIT_USAGE
 
 
 def _set_prog(mod, prog: str) -> None:
     """Show 'securityhub <cmd>' instead of the module file name in usage messages."""
-    build = getattr(mod, "build_parser", None)
-    if build is None or getattr(build, "_hub_wrapped", False):
-        return
+    targets = [mod] + [m for m in (getattr(mod, "cli", None),) if m is not None]
+    for target in targets:
+        build = getattr(target, "build_parser", None)
+        if build is None:
+            continue
+        original = getattr(build, "_hub_original", build)
 
-    def wrapped(*a, **k):
-        parser = build(*a, **k)
-        parser.prog = prog
-        return parser
-    wrapped._hub_wrapped = True
-    mod.build_parser = wrapped
+        def wrapped(*a, _orig=original, **k):
+            parser = _orig(*a, **k)
+            parser.prog = prog
+            return parser
+        wrapped._hub_original = original
+        target.build_parser = wrapped
 
 
 if __name__ == "__main__":

@@ -20,7 +20,8 @@ def payload(path):
 class SplitTest(TempDirTest):
     def scan(self, *extra, out="dns.html"):
         with silenced(), fake_dns():
-            code = cli.main(["dns", fixture("domains.csv"), "-o", self.path(out), "--json", "--csv",
+            both = [] if "--combined" in extra else ["--email-output", self.path(out.replace("dns", "email"))]
+            code = cli.main(["dns", fixture("domains.csv"), "-o", self.path(out)] + both + ["--json", "--csv",
                              "--checks", "all,axfr"] + OFFLINE_ARGS + list(extra))
         self.assertEqual(code, EXIT_OK)
 

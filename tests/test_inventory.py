@@ -103,6 +103,7 @@ class PortalAssetsTest(TempDirTest):
     def test_portal_and_posture_carry_the_inventory(self):
         with silenced():
             with fake_dns():
+                cli.main(["email", fixture("domains.csv"), "-o", self.path("email.html")] + OFFLINE_ARGS)
                 cli.main(["dns", fixture("domains.csv"), "-o", self.path("dns.html")] + OFFLINE_ARGS)
             cli.main(["waf", "--from-json", fixture("waf_snapshot.json"), "-o", self.path("waf.html")])
             cli.main(["zta", fixture("ZeroTrustAssessmentReport.json"), "-o", self.path("zta.html")])

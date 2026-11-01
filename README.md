@@ -5,8 +5,8 @@ Monitoraggio della **security posture** su tre aree, con un unico comando e un u
 | Area | Modulo | Cosa valuta | Sorgente dati |
 |------|--------|-------------|---------------|
 | **WAF** | `securityhub waf` (WAFGuard) | Configurazione Imperva Cloud WAF: onboarding, regole OWASP in blocco, eccezioni, allow-list, bot, DDoS, TLS, esposizione dell'origin | API Imperva (sola lettura) o snapshot JSON |
-| **E-mail** | `securityhub dns` (MailGuard), report `email.html` | MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI, report DMARC aggregati | DNS live (+ HTTPS per MTA-STS) |
-| **DNS** | stessa scansione, report `dns.html` | DNSSEC, CAA, takeover delle dipendenze, scadenza registrazioni, zone transfer (AXFR, opt-in), coerenza resolver, lookalike | DNS live (+ RDAP) |
+| **E-mail** | `securityhub email` (MailGuard) | MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI, report DMARC aggregati | DNS live (+ HTTPS per MTA-STS) |
+| **DNS** | `securityhub dns` (MailGuard) | DNSSEC, CAA, takeover delle dipendenze, scadenza registrazioni, zone transfer (AXFR, opt-in), coerenza resolver, lookalike | DNS live (+ RDAP) |
 | **Zero Trust** | `securityhub zta` (ZTAGuard) | Risultati del Microsoft Zero Trust Assessment per pilastro, priorità, quick win | `ZeroTrustAssessmentReport.json` |
 | **Portale** | `securityhub portal` (GuardHub) | Un solo file HTML con stato per area, KPI, piano d'azione trasversale, **vista per asset**, trend storici e i report navigabili | Report HTML generati dai moduli |
 
@@ -132,7 +132,7 @@ modules:
     input: ./ZeroTrustReport
 ```
 
-- **Elenco dei domini** (`modules.dns.input`): basta una lista semplice, un dominio per riga (anche più domini per
+- **Elenco dei domini** (`modules.email.input` / `modules.dns.input`): basta una lista semplice, un dominio per riga (anche più domini per
   riga separati da virgola o spazio; `#` per i commenti), qualunque sia l'estensione del file. Le informazioni
   aggiuntive sono facoltative: CSV con intestazione (`domain`/`dominio` più, in qualsiasi ordine, `tier`, `owner`,
   `bu`, `tags`) oppure senza intestazione, per posizione: `dominio;tier;owner;bu;tag1|tag2`, lasciando vuoti i campi
@@ -162,24 +162,28 @@ Con `securityhub run` l'unico HTML prodotto è il **portale** (`security_hub.htm
 tutte le aree (Email, DNS, WAF, Zero Trust) con i rispettivi report navigabili. Nelle cartelle delle esecuzioni ogni modulo
 lascia solo dati (`<modulo>.report.json` più export JSON/CSV e log); il portale ricostruisce le pagine dei report da quei
 dati con la grafica corrente (identiche a quelle che il modulo scriverebbe). Le esecuzioni precedenti che contengono ancora
-pagine HTML vengono convertite automaticamente al primo `run`. I comandi singoli (`securityhub dns|waf|zta`) continuano a
+pagine HTML vengono convertite automaticamente al primo `run`. I comandi singoli (`securityhub email|dns|waf|zta`) continuano a
 scrivere il proprio report HTML.
 
 ## Report e-mail e report DNS
 
-Il modulo `dns` esegue **una sola scansione** (il controllo di takeover usa SPF, DKIM e DMARC: due scansioni
-raddoppierebbero il traffico) e ne ricava **due report distinti**, ciascuno con i propri controlli, finding, punteggio,
-correzioni suggerite, export JSON/CSV e area nel portale:
+Quattro comandi, un report ciascuno: `securityhub email`, `securityhub dns`, `securityhub waf`, `securityhub zta`.
+I report e-mail e DNS hanno ciascuno i propri controlli, finding, punteggio, correzioni suggerite, export JSON/CSV e area
+nel portale:
 
-| Report | File | Controlli | Punteggio |
+| Report | Comando / modulo | Controlli | Punteggio |
 |---|---|---|---|
-| **Email security** | `email.html` (`.json`, `.csv`) | MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI, report DMARC; requisiti Gmail/Yahoo e Microsoft | SPF 25, DKIM 25, DMARC 35, MTA-STS 7, TLS-RPT 3 (normalizzato a 100) |
-| **DNS security** | `dns.html` (`.json`, `.csv`) | DNSSEC, CAA, takeover e scadenza registrazioni, zone transfer, coerenza, lookalike | DNSSEC 30, CAA 25, takeover 30, zone transfer 15; i controlli non misurabili sono esclusi dal massimo |
+| **Email security** | `securityhub email` | MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI, report DMARC; requisiti Gmail/Yahoo e Microsoft | SPF 25, DKIM 25, DMARC 35, MTA-STS 7, TLS-RPT 3 (normalizzato a 100) |
+| **DNS security** | `securityhub dns` | DNSSEC, CAA, takeover e scadenza registrazioni; opzionali: zone transfer (`axfr`), coerenza, lookalike | DNSSEC 30, CAA 25, takeover 30, zone transfer 15; i controlli non misurabili sono esclusi dal massimo |
 
-Da riga di comando: `-o dns.html` scrive il report DNS e, accanto, `email.html` (oppure `--email-output`). Se si
-selezionano solo controlli di un tipo (`--checks spf,dmarc`) viene scritto solo quel report. `--combined` produce un
-unico report come nelle versioni precedenti. Il primo confronto con una baseline combinata (versione 3) confronta solo
-i finding, non i punteggi: le scale sono diverse.
+Ciascun comando accetta solo i propri controlli (`securityhub email --checks caa` suggerisce `securityhub dns`).
+`securityhub dns --combined` produce un unico report con tutti i controlli, come nelle versioni precedenti.
+
+**Una sola scansione in `securityhub run`.** Nella configurazione `email` e `dns` sono due moduli; se usano lo stesso
+`input` e non hanno opzioni in conflitto (es. resolver o timeout diversi), vengono valutati con **una sola scansione**
+che produce entrambi i report: il controllo di takeover usa i dati di SPF, DKIM e DMARC e due scansioni
+raddoppierebbero il traffico DNS. Una configurazione con il solo modulo `dns` (versioni precedenti) continua a produrre
+entrambi i report. Il primo confronto con una baseline combinata (versione 3) confronta solo i finding, non i punteggi.
 
 ## Controlli DNS aggiuntivi
 
@@ -275,7 +279,8 @@ inviato a un SIEM o a una dashboard.
 Ogni modulo resta utilizzabile da solo, con le stesse opzioni degli script originali:
 
 ```bash
-securityhub dns domains.csv -o dns.html --json --csv --checks all,takeover
+securityhub email domains.csv -o email.html --json --csv --dmarc-reports ./rua
+securityhub dns domains.csv -o dns.html --json --csv --checks all,axfr
 securityhub waf --account-id 1234567 --include-subaccounts --probe --json
 securityhub waf --from-json snapshot.json --baseline last.json           # offline, da snapshot
 securityhub zta ./ZeroTrustReport -o zta.html --json --baseline prev.json
@@ -286,7 +291,7 @@ Corrispondenza con gli script originali:
 
 | Prima | Ora |
 |-------|-----|
-| `python MailGuardDNS.py ...` | `securityhub dns ...` (alias `mail`, `email`) |
+| `python MailGuardDNS.py ...` | `securityhub email ...` (alias `mail`) per i controlli e-mail, `securityhub dns ...` per quelli DNS, `securityhub dns --combined` per un report unico |
 | `python WAFGuard.py ...` | `securityhub waf ...` |
 | `python ZTAGuard.py ...` | `securityhub zta ...` (alias `zt`) |
 | `python GuardHub.py ...` | `securityhub portal ...` (alias `hub`) |

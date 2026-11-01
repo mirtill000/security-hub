@@ -37,11 +37,13 @@ from .console import Progress, Style, fmt_secs, print_posture
 
 # name -> (module, positional argument fed from `input`, human label)
 MODULES: Dict[str, Tuple[str, Optional[str], str]] = {
-    "dns": ("securityhub.scanners.dns_email", "input_file", "E-mail and DNS security (MailGuard)"),
+    "email": ("securityhub.scanners.dns_email", "input_file", "E-mail security (MailGuard)"),
+    "dns": ("securityhub.scanners.dns_email", "input_file", "DNS security (MailGuard)"),
     "waf": ("securityhub.scanners.waf", None, "Imperva Cloud WAF (WAFGuard)"),
     "zta": ("securityhub.scanners.zero_trust", "input", "Microsoft Zero Trust (ZTAGuard)"),
 }
 ORDER = list(MODULES)
+MAILGUARD = ("email", "dns")  # same scanner: one scan can produce both reports
 RUNS_DIR = "runs"
 RUN_FORMAT = "%Y-%m-%dT%H%M%SZ"
 
@@ -69,19 +71,27 @@ keep_runs: 12                            # older run folders are deleted (0 = ke
 # module_timeout: 3600                   # stop a module after this many seconds (per module: timeout)
 
 modules:
-  # E-mail and DNS security of a domain portfolio (needs: pip install dnspython)
+  # E-mail and DNS security of a domain portfolio (needs: pip install dnspython).
+  # On the same input, email and dns are assessed with ONE scan (two reports): options they share must match.
+  email:
+    enabled: true
+    input: domains.csv                   # a plain list of domains is enough; tier/owner/bu/tags columns are optional
+    options:
+      checks: all                        # mx, spf, dkim, dmarc, mta-sts, tls-rpt, bimi
+      csv: true
+      # dmarc_reports: [./rua]           # DMARC aggregate reports (.xml/.gz/.zip/.eml)
+      # full_dkim: true                  # probe every DKIM selector (complete audit, slower; e.g. once a month)
+
   dns:
     enabled: true
     # timeout: 7200                      # large portfolios with lookalikes can take long
-    input: domains.csv                   # a plain list of domains is enough; tier/owner/bu/tags columns are optional
+    input: domains.csv
     options:
-      checks: all,takeover               # add axfr (active zone transfer test), lookalikes, consistency
+      checks: all                        # dnssec, caa, takeover; add axfr (active test), lookalikes, consistency
       csv: true
-      # dmarc_reports: [./rua]           # DMARC aggregate reports (.xml/.gz/.zip/.eml)
-      # nameservers: [1.1.1.1, 8.8.8.8]
-      # qps: 50                         # max DNS queries per second (default: unlimited)
-      # max_inflight: 32               # max DNS queries on the wire at once (default 32: router friendly)
-      # full_dkim: true                # probe every DKIM selector (complete audit, slower; e.g. once a month)
+      # nameservers: [1.1.1.1, 8.8.8.8]  # shared with email: set the same value in both, or the scans are separate
+      # qps: 50                          # max DNS queries per second (default: unlimited)
+      # max_inflight: 32                 # max DNS queries on the wire at once (default 32: router friendly)
 
   # Imperva Cloud WAF configuration (read-only API calls)
   # Credentials: export IMPERVA_API_ID=... IMPERVA_API_KEY=...  (never in this file)
@@ -142,7 +152,7 @@ def load_config(path: str) -> dict:
         raise ConfigError("the configuration must be a mapping")
     mods = cfg.get("modules") or {}
     if not isinstance(mods, dict):
-        raise ConfigError("'modules' must be a mapping of dns / waf / zta")
+        raise ConfigError("'modules' must be a mapping of email / dns / waf / zta")
     unknown = set(mods) - set(MODULES)
     if unknown:
         raise ConfigError(f"unknown module(s): {', '.join(sorted(unknown))} (available: {', '.join(ORDER)})")
@@ -193,7 +203,7 @@ def options_to_argv(parser: argparse.ArgumentParser, options: Dict[str, Any]) ->
 def module_argv(name: str, spec: dict, base_dir: str, out_html: str, baseline: Optional[str],
                 fail_under: Optional[int]) -> List[str]:
     mod = importlib.import_module(MODULES[name][0])
-    parser = mod.build_parser()
+    parser = mod.build_parser(name) if name in MAILGUARD else mod.build_parser()
     options = dict(spec.get("options") or {})
     if not isinstance(options, dict):
         raise ConfigError(f"{name}: 'options' must be a mapping")
@@ -352,6 +362,51 @@ def publish_outputs(publish: dict, hub: str, posture_file: str) -> List[str]:
     return done
 
 
+def mailguard_scan(mods: dict, selected: List[str]) -> Optional[dict]:
+    """The 'dns' module spec of one scan producing both the e-mail and the DNS report, or None.
+
+    - only 'dns' is configured (configurations written before the 'email' module existed): both reports,
+      with the checks of 'dns' as they were;
+    - 'email' and 'dns' both enabled on the same input, without conflicting options: one scan with the
+      checks of each, so the DNS traffic is not doubled (the takeover check needs SPF/DKIM/DMARC data).
+    """
+    from .scanners.dns_email import parse_checks
+    from .scanners.dns_email.views import VIEWS
+    if "dns" in selected and "email" not in mods:
+        spec = dict(mods["dns"] or {})
+        opts = dict(spec.get("options") or {})
+        opts.setdefault("checks", "all")
+        spec["options"] = opts
+        return spec
+    if not {"email", "dns"} <= set(selected):
+        return None
+    e, d = mods["email"] or {}, mods["dns"] or {}
+    if _resolve("/", str(e.get("input") or "")) != _resolve("/", str(d.get("input") or "")):
+        return None
+    eo, do = dict(e.get("options") or {}), dict(d.get("options") or {})
+    norm = lambda o: {str(k).replace("-", "_"): v for k, v in o.items()}
+    eo, do = norm(eo), norm(do)
+    if any(eo[k] != do[k] for k in set(eo) & set(do) - {"checks", "skip"}):
+        return None  # e.g. different resolvers or timeouts: keep two scans
+    try:
+        checks = []
+        for name, o in (("email", eo), ("dns", do)):
+            spec = o.get("checks", "all")
+            spec = ",".join(spec) if isinstance(spec, list) else str(spec)
+            skip = o.get("skip", "")
+            skip = ",".join(skip) if isinstance(skip, list) else str(skip)
+            checks += [c for c in parse_checks(spec, skip) if c in VIEWS[name]["checks"]]
+    except ValueError as ex:
+        raise ConfigError(f"checks: {ex}")
+    opts = {**eo, **do, "checks": ",".join(checks)}
+    opts.pop("skip", None)
+    spec = {"input": d.get("input"), "options": opts}
+    t = [x.get("timeout") for x in (e, d)]
+    if None not in t:
+        spec["timeout"] = max(float(x) for x in t)
+    return spec
+
+
 def _tail(path: str, n: int = 12) -> List[str]:
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
@@ -409,8 +464,12 @@ def run(config_path: str, only: Optional[List[str]] = None, dry_run: bool = Fals
         stamp = when.strftime(RUN_FORMAT)
     run_dir = os.path.join(out_dir, RUNS_DIR, stamp)
     plans = []
+    labels = {n: MODULES[n][2] for n in selected}
+    merged = mailguard_scan(mods, selected)  # e-mail + DNS with one scan, when they can share it
     for name in selected:
-        spec = mods[name] or {}
+        if merged and name == "email":
+            continue
+        spec = merged if (merged and name == "dns") else (mods[name] or {})
         out_html = os.path.join(run_dir, f"{name}.html")
         baseline = previous_export(previous, name) if auto_baseline else None
         t = spec.get("timeout", default_timeout)
@@ -418,7 +477,11 @@ def run(config_path: str, only: Optional[List[str]] = None, dry_run: bool = Fals
             t = float(t) if t not in (None, "", 0) else None
         except (TypeError, ValueError):
             raise ConfigError(f"{name}: timeout must be a number of seconds")
-        plans.append((name, out_html, module_argv(name, spec, base_dir, out_html, baseline, fail_under), t))
+        argv = module_argv(name, spec, base_dir, out_html, baseline, fail_under)
+        if merged and name == "dns":
+            argv += ["--email-output", os.path.join(run_dir, "email.html")]
+            labels["dns"] = "E-mail and DNS security (MailGuard, one scan)"
+        plans.append((name, out_html, argv, t))
 
     if dry_run:
         for name, _, argv, t in plans:  # no secrets: they are rejected from the configuration
@@ -435,7 +498,7 @@ def run(config_path: str, only: Optional[List[str]] = None, dry_run: bool = Fals
         return EXIT_USAGE
     try:
         return _execute(cfg, plans, out_dir, stamp, when, run_dir, parallel, max_age, fail_under, quiet, verbose, say, err,
-                        publish)
+                        publish, labels)
     finally:
         lock.__exit__(None, None, None)
 
@@ -453,7 +516,7 @@ def _claim_run_dir(out_dir: str, stamp: str, when: datetime) -> Tuple[str, str]:
 
 
 def _execute(cfg, plans, out_dir, stamp, when, run_dir, parallel, max_age, fail_under, quiet, verbose, say, err,
-             publish=None) -> int:
+             publish=None, labels=None) -> int:
     os.makedirs(os.path.join(out_dir, RUNS_DIR), exist_ok=True)
     claimed, stamp = _claim_run_dir(out_dir, stamp, when)
     if claimed != run_dir:  # the planned folder was taken meanwhile: move the outputs of every module
@@ -464,7 +527,7 @@ def _execute(cfg, plans, out_dir, stamp, when, run_dir, parallel, max_age, fail_
         say(err("Security Hub", "bold") + f" run {stamp}  {err.dot}  {len(plans)} module{'s' if len(plans) != 1 else ''}"
             + (f", up to {min(parallel, len(plans))} in parallel" if parallel > 1 and len(plans) > 1 else "")
             + f"  {err.dot}  {err(run_dir, 'dim')}")
-    labels = {n: MODULES[n][2] for n, *_ in plans}
+    labels = {n: (labels or {}).get(n) or MODULES[n][2] for n, *_ in plans}
     progress = Progress([n for n, *_ in plans], labels, sys.stderr, enabled=not quiet, live=False if verbose else None)
 
     def echo(line: str) -> None:

@@ -51,6 +51,7 @@ class OneHtmlTest(TempDirTest):
 
     def test_rebuilt_dns_pages(self):
         with silenced(), fake_dns():
+            cli.main(["email", fixture("domains.csv"), "-o", self.path("email.html")] + OFFLINE_ARGS)
             cli.main(["dns", fixture("domains.csv"), "-o", self.path("dns.html")] + OFFLINE_ARGS)
         pages = {}
         for n in ("email", "dns"):
