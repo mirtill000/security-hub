@@ -7,7 +7,7 @@ keep_runs: 12                            # older run folders are deleted (0 = ke
 # fail_under: 70                         # exit code 2 if an area / asset scores below this
 # auto_baseline: true                    # compare every module with its previous run
 # max_parallel: 3                        # modules run at the same time (1 = one after the other)
-# max_age_days: {email: 2, dns: 2, waf: 2, zta: 35}  # data older than this is flagged as stale in portal and summary
+# max_age_days: {email: 2, dns: 2, waf: 2, edr: 2, zta: 35}  # data older than this is flagged as stale in portal and summary
 # publish: /var/www/html/securityhub     # after each run copy the portal there as index.html (web server)
 #   or: publish: {dir: /var/www/html/securityhub, posture: true, mode: "0640"}
 # module_timeout: 3600                   # stop a module after this many seconds (per module: timeout)
@@ -46,6 +46,21 @@ modules:
       csv: true
       # metadata: sites.csv              # tier/owner/bu/tags/max_rps per website
       # from_json: snapshot.json         # offline: analyze a saved snapshot instead of the API
+
+  # SentinelOne EDR posture (read-only API calls; a token with the Viewer role is enough)
+  # Credentials: export S1_CONSOLE_URL=https://<tenant>.sentinelone.net S1_API_TOKEN=...  (never in this file)
+  edr:
+    enabled: false
+    options:
+      csv: true
+      # console: https://contoso.sentinelone.net   # instead of S1_CONSOLE_URL
+      # api_token_file: /etc/securityhub/s1.token  # instead of S1_API_TOKEN (file readable only by the service user)
+      # sites: [EMEA, US]                # only these sites (default: every site the token can see)
+      # inventory: hosts.csv             # expected hosts: those without an agent are reported as coverage gaps
+      # metadata: endpoints.csv          # tier/owner/bu/tags per hostname, group or site
+      # stale_days: 14                   # agent not seen for more than N days = stale
+      # threat_sla_days: 7               # open threats older than N days breach the SLA
+      # from_json: s1_snapshot.json      # offline: analyze a saved snapshot instead of the API
 
   # Microsoft Zero Trust Assessment (run Invoke-ZtAssessment first, then point to its folder)
   zta:

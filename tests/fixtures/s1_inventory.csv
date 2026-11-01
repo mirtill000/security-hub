@@ -1,0 +1,10 @@
+hostname;owner
+ws-milano-01;it
+ws-milano-02;it
+srv-sql-01.contoso.local;dba
+srv-web-02;web
+mac-design-03;design
+ws-old-07;it
+ws-rome-04;it
+srv-backup-01;it
+ws-reception-02;facility

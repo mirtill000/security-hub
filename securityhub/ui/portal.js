@@ -8,7 +8,7 @@ const $ = (s, r) => (r || document).querySelector(s);
 const scoreCls = n => n === null || n === undefined ? '' : n >= 80 ? 'hi' : n >= 50 ? 'mid' : 'lo';
 const ICONS = {
   grid: '<path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/>', shield: '<path d="M12 3 4 6v6c0 5 3.4 8.6 8 9.5 4.6-.9 8-4.5 8-9.5V6l-8-3z"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
-  email: '<path d="M3 5h18v14H3zM3 6l9 7 9-7"/>', dns: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/>', waf: '<path d="M4 6h16M4 12h16M4 18h16M8 6v6M16 12v6M12 18v-6"/>', zta: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.2-3.6 4-5.5 7-5.5s5.8 1.9 7 5.5"/>',
+  edr: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4M9.5 10l2 2 3.5-3.5"/>', email: '<path d="M3 5h18v14H3zM3 6l9 7 9-7"/>', dns: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/>', waf: '<path d="M4 6h16M4 12h16M4 18h16M8 6v6M16 12v6M12 18v-6"/>', zta: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.2-3.6 4-5.5 7-5.5s5.8 1.9 7 5.5"/>',
   other: '<path d="M6 3h9l4 4v14H6zM14 3v5h5"/>', ext: '<path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/>', download: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',
   left: '<path d="m15 6-6 6 6 6"/>', sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>', monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>', link: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3A4.5 4.5 0 0 0 13 4.6l-1 1M14 10a4.5 4.5 0 0 0-6.4 0l-3 3A4.5 4.5 0 0 0 11 19.4l1-1"/>',
@@ -108,13 +108,13 @@ function lineChart(s) {
   const vlab = pts.map((p, i) => `<text x="${x(p[0]).toFixed(1)}" y="${(y(p[1]) - 9).toFixed(1)}" text-anchor="${i === 0 ? 'start' : i === pts.length - 1 ? 'end' : 'middle'}" class="tv">${p[1]}</text>`).join('');
   return `<svg class="tchart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(s.label)} over time: ${esc(pts.map(p => fmtD(p[0]) + ' ' + p[1] + s.unit).join(', '))}">${grid}${tgt}<path d="${path}" class="tp"/>${dots}${vlab}${lbls}</svg>`;
 }
-const KORDER = ['score', 'spoof', 'dnssec', 'caa', 'waf', 'zt', 'mfa', 'pr', 'dev'];
+const KORDER = ['score', 'spoof', 'dnssec', 'caa', 'waf', 'edr_protect', 'edr_health', 'edr_coverage', 'zt', 'mfa', 'pr', 'dev'];
 function trends() {
   const dup = s => s.key === 'zt' && SERIES.some(o => o.key === 'score' && o.area === s.area && o.subject === s.subject);
   const ss = SERIES.filter(s => s.points.length >= 2 && !dup(s)).sort((a, b) => KORDER.indexOf(a.key) - KORDER.indexOf(b.key) || a.area.localeCompare(b.area));
   if (!ss.length) return '<div class="card empty"><b>No history yet</b>Generate the portal with reports from two or more assessments (for example one folder per quarter) to see trends.</div>';
   const first = RUNS[0], last = RUNS[RUNS.length - 1];
-  const lab = {email: 'Email security', dns: 'DNS security', waf: 'Imperva Cloud WAF', zta: 'Microsoft Zero Trust'};
+  const lab = {email: 'Email security', dns: 'DNS security', waf: 'Imperva Cloud WAF', edr: 'SentinelOne EDR', zta: 'Microsoft Zero Trust'};
   return `<div class="section-title"><h2>Trends</h2><p>${RUNS.length} assessments from ${esc(fmtD(first.date))} to ${esc(fmtD(last.date))}</p></div>
     <div class="trend-grid">${ss.map(s => { const a = s.points[0], b = s.points[s.points.length - 1], d = Math.round((b[1] - a[1]) * 10) / 10;
       return `<section class="card"><header><h2>${esc(s.label)}</h2><span class="act"><span class="hub-type">${icon(s.area, 14)}${esc(lab[s.area] || s.area)}</span></span></header>
@@ -306,7 +306,7 @@ function topbar() {
 function chrome() { $('#side').innerHTML = side(); $('#topbar').innerHTML = topbar(); }
 
 /* ---------- overview ---------- */
-const MAXAGE = M.max_age_days || {email: 2, dns: 2, waf: 2, zta: 35};
+const MAXAGE = M.max_age_days || {email: 2, dns: 2, waf: 2, edr: 2, zta: 35};
 function fresh(r) {
   const t = Date.parse(r.date), age = isNaN(t) ? null : (Date.now() - t) / 864e5, lim = MAXAGE[r.type];
   return {age, lim, stale: age !== null && lim !== undefined && age > lim,
@@ -323,7 +323,7 @@ function staleBanner() {
 const deltaTxt = d => !d || (d.improved === null && d.worsened === null) ? '' :
   `<span class="delta-up">${d.improved || 0} better</span>, <span class="delta-down">${d.worsened || 0} worse</span> since the baseline`;
 const AREA_ST = {good: ['On track', 'pass'], warn: ['Needs attention', 'warn'], bad: ['At risk', 'fail'], unknown: ['Not verified', 'na']};
-const NOUN = {email: ['domain', 'domains'], dns: ['domain', 'domains'], waf: ['website', 'websites']};
+const NOUN = {email: ['domain', 'domains'], dns: ['domain', 'domains'], waf: ['website', 'websites'], edr: ['endpoint', 'endpoints']};
 function tone(k) {
   if (k.value === null || k.value === undefined) return 'na';
   const v = k.unit === '/100' || k.unit === '%' ? k.value : null;
@@ -334,7 +334,7 @@ const trendChip = (t, unit) => t === null || t === undefined ? '' : t === 0 ? '<
   : `<span class="exec-trend ${t > 0 ? 'up' : 'down'}">${t > 0 ? '\u25B2 +' : '\u25BC '}${t}${unit || ''} since baseline</span>`;
 function overview() {
   const PF = M.portfolio || {}, areas = RP.filter(r => r.exec);
-  const order = ['spoof', 'dnssec', 'caa', 'waf', 'zt', 'mfa', 'pr', 'dev'];
+  const order = ['spoof', 'dnssec', 'caa', 'waf', 'edr_protect', 'edr_coverage', 'edr_health', 'zt', 'mfa', 'pr', 'dev'];
   const kpis = areas.flatMap(r => r.exec.kpis.map(k => ({...k, r}))).sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key)).slice(0, 8);
   const hero = `<section class="card exec-hero"><div><p class="exec-kicker">${esc(M.title)}</p><h2 class="exec-headline">${esc(PF.sentence || '')}</h2>
       <div class="exec-chips">${RP.map(r => { const st = AREA_ST[(r.exec || {}).status || 'unknown']; return `<button class="exec-chip" data-open="${r.id}"><i class="dot c-${st[1]}"></i>${esc(r.label)}<span>${esc(st[0])}${fresh(r).stale ? ' \u00b7 stale data' : ''}</span></button>`; }).join('')}</div></div>
@@ -355,7 +355,7 @@ function overview() {
     ${acts.map(a => `<li><button class="exec-act" data-go="${esc(a.report)}" data-h="${esc(a.hash)}"><span class="sev-bar sev-${esc(a.severity)}"></span>
       <span class="exec-act-main"><b>${esc(a.title)}</b><span class="exec-act-rec">${esc(a.rec)}</span></span>
       <span class="exec-act-meta"><span class="hub-type">${icon(a.area, 14)}${esc(a.label)}</span>
-        <span class="exec-act-n">${a.area === 'zta' ? 'single control' : `${esc(a.count)} ${(NOUN[a.area] || ['asset', 'assets'])[a.count === 1 ? 0 : 1]}${a.share !== null && a.share !== undefined ? ` <span class="faint">(${esc(a.share)}%)</span>` : ''}`}${a.critical_tier ? `, <span class="tx-bad">${esc(a.critical_tier)} critical tier</span>` : ''}</span></span></button></li>`).join('')}</ul></div></section>` : '';
+        <span class="exec-act-n">${a.area === 'zta' ? 'single control' : a.count === null || a.count === undefined ? 'console setting' : `${esc(a.count)} ${(NOUN[a.area] || ['asset', 'assets'])[a.count === 1 ? 0 : 1]}${a.share !== null && a.share !== undefined ? ` <span class="faint">(${esc(a.share)}%)</span>` : ''}`}${a.critical_tier ? `, <span class="tx-bad">${esc(a.critical_tier)} critical tier</span>` : ''}</span></span></button></li>`).join('')}</ul></div></section>` : '';
   const risks = RP.flatMap(r => (r.top || []).map((t, k) => ({...t, r, k}))).sort((a, b) => (a.severity === 'critical' ? 0 : 1) - (b.severity === 'critical' ? 0 : 1) || a.k - b.k).slice(0, 20);
   const riskCell = t => t.score !== null && t.score !== undefined ? `<span class="score ${scoreCls(t.score)}">${esc(t.score)}</span>` : `<span class="pill ${({high: 's-fail', medium: 's-warn', low: 's-null'})[t.risk] || 's-na'}">${esc(t.risk || '')}</span>`;
   const detail = risks.length ? `<details class="card exec-detail"><summary><b>Most exposed assets and controls</b> <span class="faint">${risks.length} items, for analysts</span></summary>

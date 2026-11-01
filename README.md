@@ -1,12 +1,13 @@
 # Security Hub
 
-Monitoraggio della **security posture** su tre aree, con un unico comando e un unico portale:
+Monitoraggio della **security posture** su più aree (e-mail, DNS, WAF, EDR, Zero Trust), con un unico comando e un unico portale:
 
 | Area | Modulo | Cosa valuta | Sorgente dati |
 |------|--------|-------------|---------------|
 | **WAF** | `securityhub waf` (WAFGuard) | Configurazione Imperva Cloud WAF: onboarding, regole OWASP in blocco, eccezioni, allow-list, bot, DDoS, TLS, esposizione dell'origin | API Imperva (sola lettura) o snapshot JSON |
 | **E-mail** | `securityhub email` (MailGuard) | MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI, report DMARC aggregati | DNS live (+ HTTPS per MTA-STS) |
 | **DNS** | `securityhub dns` (MailGuard) | DNSSEC, CAA, takeover delle dipendenze, scadenza registrazioni, zone transfer (AXFR, opt-in), coerenza resolver, lookalike | DNS live (+ RDAP) |
+| **EDR** | `securityhub edr` (EDRGuard) | SentinelOne: salute e versione degli agent, Protect vs Detect, anti-tamper, motori, snapshot, minacce aperte e SLA, esclusioni rischiose, copertura rispetto all'inventario | API SentinelOne v2.1 (sola lettura) o snapshot JSON |
 | **Zero Trust** | `securityhub zta` (ZTAGuard) | Risultati del Microsoft Zero Trust Assessment per pilastro, priorità, quick win | `ZeroTrustAssessmentReport.json` |
 | **Portale** | `securityhub portal` (GuardHub) | Un solo file HTML con stato per area, KPI, piano d'azione trasversale, **vista per asset**, trend storici e i report navigabili | Report HTML generati dai moduli |
 
@@ -274,6 +275,42 @@ inviato a un SIEM o a una dashboard.
 - **Esecuzioni sovrapposte.** Un lock sulla cartella di output impedisce due `run` contemporanei (il secondo termina
   con un errore che indica chi tiene il lock); portale e `posture.json` sono scritti in modo atomico.
 
+## SentinelOne EDR
+
+`securityhub edr` (alias `s1`, `sentinelone`) legge la console SentinelOne con le API v2.1 **in sola lettura** e
+valuta ogni endpoint (agent attivo) e la configurazione della console.
+
+**Credenziali**: mai nel file di configurazione (il `run` rifiuta `api_token`). Usa un **API token di un utente di
+servizio con ruolo Viewer** (sola lettura) e passalo con variabili d'ambiente o con un file leggibile solo
+dall'utente che esegue il tool:
+
+```bash
+export S1_CONSOLE_URL=https://contoso.sentinelone.net
+export S1_API_TOKEN=...                                   # oppure --api-token-file /etc/securityhub/s1.token
+securityhub edr -o edr.html --json --csv --inventory hosts.csv
+securityhub edr --save-raw s1.json                        # salva lo snapshot (senza credenziali, IP o utenti)
+securityhub edr --from-json s1.json --baseline prev.json  # analisi offline
+```
+
+| Controllo | Peso | Cosa verifica |
+|-----------|-----:|---------------|
+| `health` | 20 | Agent attivo, visto negli ultimi `--stale-days` giorni (14), senza azioni pendenti (riavvio, permessi macOS) |
+| `protection` | 30 | Mitigazione in **Protect** (blocca, non solo Detect) per le minacce malevole; le sospette in Detect sono solo informative |
+| `policy` | 25 | Policy effettiva (sito, o gruppo che non eredita): anti-tamper, motori di rilevamento attivi, snapshot VSS per il rollback, mitigazione automatica oltre il solo kill |
+| `version` | 10 | Agent allineato all'ultima release GA; 2+ major indietro limita il punteggio a 70 |
+| `threats` | 15 | Minacce non mitigate (punteggio max 20), minacce aperte oltre `--threat-sla-days` (7) |
+| `vulnerabilities`, `scan` | info | Applicazioni vulnerabili note all'agent, full disk scan mai completato |
+
+Profili endpoint: *Active threat*, *Agent disabled*, *Not seen recently*, *Detect mode only*, *Protected*.
+La pagina **Policies and exclusions** riporta i rilievi di console: esclusioni troppo ampie (wildcard iniziali,
+interi dischi, cartelle scrivibili dagli utenti come Temp/AppData/Downloads, tipi di file eseguibili), esclusioni
+che disattivano tutti i monitor o senza descrizione, policy in Detect o con anti-tamper spento, agent duplicati,
+agent fermi da oltre 90 giorni e **host dell'inventario senza agent** (`--inventory`: CSV con colonna
+hostname o semplice elenco). `--metadata` aggiunge tier/owner/bu/tag per hostname, gruppo o sito.
+
+Una policy non leggibile (token con scope ristretto) è *non verificata*, non un fallimento. Nel portale l'area
+è *At risk* se c'è una minaccia non mitigata, che guida sempre il piano d'azione.
+
 ## Uso dei singoli moduli
 
 Ogni modulo resta utilizzabile da solo, con le stesse opzioni degli script originali:
@@ -283,6 +320,7 @@ securityhub email domains.csv -o email.html --json --csv --dmarc-reports ./rua
 securityhub dns domains.csv -o dns.html --json --csv --checks all,axfr
 securityhub waf --account-id 1234567 --include-subaccounts --probe --json
 securityhub waf --from-json snapshot.json --baseline last.json           # offline, da snapshot
+securityhub edr -o edr.html --json --inventory hosts.csv                # SentinelOne (S1_CONSOLE_URL, S1_API_TOKEN)
 securityhub zta ./ZeroTrustReport -o zta.html --json --baseline prev.json
 securityhub portal ./q1 ./q2 ./q3 -o security_hub.html --summary-json posture.json
 ```
@@ -311,12 +349,13 @@ securityhub/
   ui/                  design system condiviso di report e portale (assemblato in file HTML singoli e offline)
     base.css             token, layout e componenti comuni a tutte le pagine
     core.js, theme.js, report-core.js, asset-report.js   funzioni condivise (tutte le pagine / i 3 report / DNS e WAF)
-    dns|waf|zta|portal.css|js, report.html, portal.html   parti specifiche
+    dns|waf|edr|zta|portal.css|js, report.html, portal.html   parti specifiche
   scanners/
     dns_email/         MailGuard DNS: constants, models, domains, dnsclient, rdap, fetch,
                        analyzer + checks_auth / checks_transport / checks_exposure / scoring,
                        lookalikes, dmarc_reports, remediation, baseline, inputs, exports, report, cli
     waf/               WAFGuard: constants, models, api, probe, checks, scoring, remediation, analysis, exports, report, cli
+    edr/               EDRGuard (SentinelOne): constants, models, api, checks, analysis, exports, report, cli
     zero_trust.py      ZTAGuard (Microsoft)
 tests/                 test automatici (pytest) con fixture sintetiche e DNS simulato (tests/fakedns.py)
 examples/              configurazione e lista domini di esempio
@@ -328,7 +367,8 @@ contenuto del file indicato.
 
 ## Note di sicurezza
 
-- Tutti i moduli sono **in sola lettura**: WAFGuard usa solo endpoint list/status/get.
+- Tutti i moduli sono **in sola lettura**: WAFGuard usa solo endpoint list/status/get, EDRGuard solo GET (token Viewer).
+- Le credenziali (Imperva, SentinelOne) non sono accettate nel file di configurazione: variabili d'ambiente o file di chiave.
 - I CSV sono protetti da formula injection; i dati inseriti nei report HTML sono escapati e le pagine hanno una CSP restrittiva.
 - Il fetch MTA-STS è protetto da SSRF (solo IP pubblici, salvo `--allow-private`).
 - `reports/`, snapshot e `securityhub.yaml` sono in `.gitignore`: descrivono la tua posture e non vanno pubblicati.

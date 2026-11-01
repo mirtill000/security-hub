@@ -37,14 +37,14 @@ __version__ = "1.2.0"
 
 DATA_RE = re.compile(r'<script type="application/json" id="mg-data">(.*?)</script>', re.S)
 TITLE_RE = re.compile(r"<title>(.*?)</title>", re.S | re.I)
-TYPE_ORDER = {"email": 0, "dns": 1, "waf": 2, "zta": 3, "other": 4}
-TYPE_LABEL = {"email": "Email security", "dns": "DNS security", "waf": "Imperva Cloud WAF", "zta": "Microsoft Zero Trust",
-              "other": "Report"}
+TYPE_ORDER = {"email": 0, "dns": 1, "waf": 2, "edr": 3, "zta": 4, "other": 5}
+TYPE_LABEL = {"email": "Email security", "dns": "DNS security", "waf": "Imperva Cloud WAF", "edr": "SentinelOne EDR",
+              "zta": "Microsoft Zero Trust", "other": "Report"}
 DOMAIN_AREAS = ("email", "dns")  # reports whose rows are domains (MailGuard: one scan, two reports)
 TIER_W = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 # Data older than this (days) is flagged as stale: DNS and WAF can be assessed daily, the Zero Trust
 # Assessment is a periodic export. Override with --max-age / max_age_days in the configuration.
-MAX_AGE_DAYS = {"email": 2, "dns": 2, "waf": 2, "zta": 35}
+MAX_AGE_DAYS = {"email": 2, "dns": 2, "waf": 2, "edr": 2, "zta": 35}
 STATUS_RANK = {"bad": 0, "warn": 1, "good": 2}
 
 
@@ -59,13 +59,15 @@ def detect(payload: Optional[dict], title: str) -> str:
     if isinstance(payload, dict):
         if isinstance(payload.get("tests"), list) and "tenant" in payload:
             return "zta"
+        if (payload.get("meta") or {}).get("tool") == "EDRGuard":
+            return "edr"
         if (payload.get("meta") or {}).get("tool") == "WAFGuard" or "account_issues" in payload:
             return "waf"
         if isinstance(payload.get("results"), list) and "checks" in payload:
             # MailGuard 4 writes an e-mail and a DNS report; older combined reports read as e-mail (their KPIs were)
             return "dns" if (payload.get("meta") or {}).get("view") == "dns" else "email"
     t = title.lower()
-    return ("zta" if "zero trust" in t else "waf" if "waf" in t else "dns" if "dns security" in t
+    return ("zta" if "zero trust" in t else "edr" if "edr" in t else "waf" if "waf" in t else "dns" if "dns security" in t
             else "email" if "email" in t else "other")
 
 
@@ -81,7 +83,7 @@ def summarize_assets(kind: str, payload: dict) -> dict:
     measured = [r for r in rows if (inventory.dns_measured(r) if kind in DOMAIN_AREAS else inventory.waf_measured(r))]
     avg = weighted_avg(measured, tiers)
     sev = Counter(i.get("severity") for r in rows for i in r.get("issues") or [])
-    noun = "domains" if kind in DOMAIN_AREAS else "websites"
+    noun = "domains" if kind in DOMAIN_AREAS else "endpoints" if kind == "edr" else "websites"
     kpis = [[len(rows), f"{noun} assessed"], *([[len(rows) - len(measured), "not verified (errors)", "warn"]] if len(measured) < len(rows) else []),
             [sum(r.get("overall_score", 0) >= 80 for r in rows), "well protected (80+)", "pass"],
             [sum(r.get("overall_score", 0) < 50 for r in measured), "at critical risk (under 50)", "fail"],
@@ -390,6 +392,65 @@ def exec_waf(payload: dict) -> dict:
                          "effectively protected by the WAF") if unprot else None}
 
 
+def exec_edr(payload: dict) -> dict:
+    """EDR outcomes: endpoints really protected, agent health, open threats, coverage, risky exclusions.
+    An endpoint whose policy could not be read is 'not verified', never 'unprotected'."""
+    rows = payload.get("results") or []
+    n = len(rows)
+    st = lambda r, c: ((r.get("checks") or {}).get(c) or {}).get("status")
+    codes = lambda r: {i.get("code") for i in r.get("issues") or []}
+    known = [r for r in rows if st(r, "protection") not in (None, "unknown", "skipped") and st(r, "policy") not in (None, "unknown", "skipped")]
+    protected = [r for r in known if st(r, "protection") == "valid" and "ANTI_TAMPER_OFF" not in codes(r)
+                 and not codes(r) & {"AGENT_STALE", "AGENT_DISABLED"}]
+    unverified = n - len(known)
+    note = f", {unverified} not verified" if unverified else ""
+    healthy = [r for r in rows if st(r, "health") == "valid"]
+    kpis = [_kpi("edr_protect", "Endpoints actively protected by the EDR", _pct(len(protected), len(known)) if known else None, "%",
+                 f"{len(protected)} of {len(known)} endpoints online, in Protect mode, anti-tamper on{note}", 100, area="edr",
+                 hash_="#/domains?comp=edr_baseline:fail"),
+            _kpi("edr_health", "Healthy agents", _pct(len(healthy), n) if n else None, "%",
+                 f"{len(healthy)} of {n} agents online without pending actions", 100, area="edr", hash_="#/domains?f=health:error")]
+    cov = payload.get("coverage")
+    if cov and cov.get("inventory"):
+        kpis.append(_kpi("edr_coverage", "Inventory hosts with an EDR agent", _pct(cov["covered"], cov["inventory"]), "%",
+                         f"{cov['covered']} of {cov['inventory']} expected hosts", 100, area="edr", hash_="#/policies"))
+    active = [r for r in rows if "THREAT_ACTIVE" in codes(r)]
+    detect = [r for r in rows if "MODE_DETECT" in codes(r)]
+    stale = [r for r in rows if codes(r) & {"AGENT_STALE", "AGENT_DISABLED"}]
+    acc = payload.get("account_issues") or []
+    broad = sum(1 for x in payload.get("exclusions") or [] if x.get("risk") == "critical")
+    side = [["Endpoints with an active threat", str(len(active)), "bad" if active else "good"],
+            ["Endpoints in Detect mode only", str(len(detect)), "bad" if detect else "good"],
+            ["Agents stale or disabled", str(len(stale)), "warn" if stale else "good"],
+            ["Overly broad exclusions", str(broad), "bad" if broad else "good"]]
+    if unverified:
+        side.append(["Not verified (policy not readable)", f"{unverified} endpoints", "warn"])
+    measured = [r for r in rows if st(r, "health") not in (None, "unknown")]
+    score = weighted_avg(measured, payload.get("tiers") or TIER_W)
+    deltas = [r["change"]["score_delta"] for r in rows if r.get("change") and r["change"].get("score_delta") is not None]
+    exposure = bool(active or detect or broad or any(i.get("code") == "COVERAGE_GAP" for i in acc))
+    head = None
+    if active:
+        head = (_pct(len(active), n), f"{len(active)} endpoint{'s' if len(active) != 1 else ''} with a threat not mitigated")
+    elif cov and cov.get("missing"):
+        head = (_pct(len(cov["missing"]), cov["inventory"]), f"{len(cov['missing'])} of {cov['inventory']} inventory hosts have no EDR agent")
+    elif detect:
+        head = (_pct(len(detect), n), f"{len(detect)} of {n} endpoints only detect malware, they do not block it")
+    actions = _asset_actions("edr", payload, rows)
+    for i in acc:  # console findings (exclusions, policies, coverage) are actions too
+        if i.get("severity") in ("critical", "warning"):
+            actions.append({"area": "edr", "code": i.get("code"), "severity": i["severity"], "title": i.get("message"),
+                            "rec": i.get("recommendation"), "count": None, "share": None, "critical_tier": 0,
+                            "impact": 40 if i["severity"] == "critical" else 10, "hash": "#/policies"})
+    # an unmitigated threat is an incident in progress: it always leads the action plan
+    actions.sort(key=lambda a: (a["code"] != "THREAT_ACTIVE", -a["impact"], a["severity"] != "critical", str(a["code"])))
+    status = _status(score, exposure)
+    if active and status != "unknown":  # a threat the EDR did not stop is an incident, whatever the average says
+        status = "bad"
+    return {"status": status, "kpis": kpis, "side": side,
+            "trend": round(sum(deltas) / len(deltas), 1) if deltas else None, "actions": actions, "headline": head}
+
+
 def exec_zta(payload: dict) -> dict:
     tests = payload.get("tests") or []
     info = payload.get("tenant_info")
@@ -467,6 +528,8 @@ def page_parts(kind: str) -> Tuple[str, str, str]:
         from .scanners.dns_email import report as m
     elif kind == "waf":
         from .scanners.waf import report as m
+    elif kind == "edr":
+        from .scanners.edr import report as m
     elif kind == "zta":
         from .scanners import zero_trust as m
     else:
@@ -532,13 +595,13 @@ def load_report(path: str, idx: int, keep: bool = True) -> dict:
     if payload is not None:
         try:
             summary = (summarize_zta(payload) if kind == "zta" else
-                       summarize_assets(kind, payload) if kind in ("email", "dns", "waf") else summary)
+                       summarize_assets(kind, payload) if kind in ("email", "dns", "waf", "edr") else summary)
         except Exception as e:  # never fail the hub because of one report
             print(f"Warning: summary of {os.path.basename(path)} not available ({type(e).__name__}: {e})", file=sys.stderr)
     summary["exec"] = None
-    if payload is not None and kind in ("email", "dns", "waf", "zta"):
+    if payload is not None and kind in ("email", "dns", "waf", "edr", "zta"):
         try:
-            summary["exec"] = {"email": exec_email, "dns": exec_dns, "waf": exec_waf, "zta": exec_zta}[kind](payload)
+            summary["exec"] = {"email": exec_email, "dns": exec_dns, "waf": exec_waf, "edr": exec_edr, "zta": exec_zta}[kind](payload)
         except Exception as e:
             print(f"Warning: executive metrics of {os.path.basename(path)} not available ({type(e).__name__}: {e})", file=sys.stderr)
     if not summary.get("generated"):

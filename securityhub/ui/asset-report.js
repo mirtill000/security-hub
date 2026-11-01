@@ -1,3 +1,5 @@
+/* Asset noun of the report: an app sets window.ASSET_NOUN (default: domain / domains). */
+function noun(n) { const w = window.ASSET_NOUN || ['domain', 'domains']; return w[n === 1 ? 0 : 1]; }
 const st = s => ST[s] || ST.missing;
 const scoreCls = n => n >= 80 ? 'hi' : n >= 50 ? 'mid' : 'lo';
 const gradeOf = n => n >= 90 ? 'A' : n >= 80 ? 'B' : n >= 65 ? 'C' : n >= 50 ? 'D' : 'F';
@@ -135,11 +137,11 @@ function findings() {
       const doms = R.filter(r => r._codes.has(c)).sort((a, b) => b.priority - a.priority);
       return `<details class="finding"><summary><span class="sev sev-${f[0]}" title="${f[0]}"></span>
         <span class="ttl"><b>${esc(f[2])}</b><span>${esc(f[1])}, ${esc(f[0])}</span></span>
-        <span class="bar fbar" title="${pct(k, R.length)}% of domains"><i class="b-${f[0] === 'critical' ? 'fail' : f[0] === 'warning' ? 'warn' : 'acc'}" style="width:${pct(k, R.length)}%"></i></span>
+        <span class="bar fbar" title="${pct(k, R.length)}% of ${noun(2)}"><i class="b-${f[0] === 'critical' ? 'fail' : f[0] === 'warning' ? 'warn' : 'acc'}" style="width:${pct(k, R.length)}%"></i></span>
         <span class="num" style="text-align:right">${k}</span><span class="chev">${icon('chev')}</span></summary>
         <div class="fbody"><p>${esc(f[3])}</p>${(FW[f[1]] || []).length ? `<div class="fw">${FW[f[1]].map(x => `<span class="tag">${esc(x)}</span>`).join('')}</div>` : ''}
           <div class="dlist">${doms.slice(0, 40).map(r => `<button data-open="${r._i}">${esc(r.domain)}</button>`).join('')}${doms.length > 40 ? `<span class="faint">and ${doms.length - 40} more</span>` : ''}</div>
-          <div><button class="btn small" data-finding="${esc(c)}">Show the ${k} domain${k === 1 ? '' : 's'} in the list${icon('arrow', 14)}</button></div></div></details>`; }).join('') || '<div class="card empty"><b>No findings</b>Nothing matches this filter.</div>'}</div>`;
+          <div><button class="btn small" data-finding="${esc(c)}">Show the ${k} ${noun(k)} in the list${icon('arrow', 14)}</button></div></div></details>`; }).join('') || '<div class="card empty"><b>No findings</b>Nothing matches this filter.</div>'}</div>`;
 }
 function changes() {
   const changed = R.filter(r => r.change && r.change.changed).sort((a, b) => (a.change.score_delta || 0) - (b.change.score_delta || 0));

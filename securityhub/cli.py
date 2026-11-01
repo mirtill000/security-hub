@@ -6,6 +6,7 @@
     securityhub email    <domains> [options]      e-mail security: MX, SPF, DKIM, DMARC... (MailGuard)
     securityhub dns      <domains> [options]      DNS security: DNSSEC, CAA, takeover, AXFR... (MailGuard)
     securityhub waf      --account-id N [options] Imperva Cloud WAF posture (WAFGuard)
+    securityhub edr      [options]                SentinelOne EDR posture (EDRGuard)
     securityhub zta      <report folder> [opts]   Microsoft Zero Trust Assessment (ZTAGuard)
     securityhub portal   <reports...> [options]   combine reports into one portal (GuardHub)
 
@@ -29,15 +30,17 @@ TOOLS = {
     "email": ("securityhub.scanners.dns_email", "main_email", "E-mail security of a domain portfolio: MX, SPF, DKIM, DMARC... (MailGuard)"),
     "dns": ("securityhub.scanners.dns_email", "main", "DNS security of a domain portfolio: DNSSEC, CAA, takeover, AXFR... (MailGuard)"),
     "waf": ("securityhub.scanners.waf", "main", "Imperva Cloud WAF configuration assessment (WAFGuard)"),
+    "edr": ("securityhub.scanners.edr", "main", "SentinelOne EDR posture: agents, policies, threats, exclusions (EDRGuard)"),
     "zta": ("securityhub.scanners.zero_trust", "main", "Microsoft Zero Trust Assessment report (ZTAGuard)"),
     "portal": ("securityhub.portal", "main", "Combine reports into one navigable portal (GuardHub)"),
 }
-ALIASES = {"mail": "email", "e-mail": "email", "zt": "zta", "zerotrust": "zta", "hub": "portal"}
+ALIASES = {"mail": "email", "e-mail": "email", "zt": "zta", "zerotrust": "zta", "hub": "portal",
+           "sentinelone": "edr", "s1": "edr"}
 DEFAULT_CONFIG = "securityhub.yaml"
 
 
 def _usage() -> str:
-    lines = [f"Security Hub {__version__} - security posture monitoring for WAF, DNS / e-mail and Zero Trust", "",
+    lines = [f"Security Hub {__version__} - security posture monitoring for e-mail, DNS, WAF, EDR and Zero Trust", "",
              "usage: securityhub <command> [options]", "", "Commands:",
              "  run       Run the enabled modules from a configuration file, update the portal and posture.json",
              "  status    Print the current posture from an output folder or from reports",
