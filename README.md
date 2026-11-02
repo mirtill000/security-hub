@@ -234,7 +234,7 @@ publish: /var/www/html/securityhub
 Viene pubblicato **solo il portale** (e `posture.json` se `posture: true`): mai le cartelle delle esecuzioni, gli export
 JSON/CSV o i log. La cartella deve esistere ed essere scrivibile dall'utente che esegue `run`. Il portale descrive i
 punti deboli dell'organizzazione: va protetto con autenticazione e, se possibile, limitato alla rete di gestione.
-In `deploy/raspberry-pi/` ci sono unità systemd (servizio + timer giornaliero) e la configurazione nginx d'esempio.
+In `deploy/raspberry-pi/` ci sono unità systemd (servizio + timer: 4 esecuzioni al giorno, verso le 6, 10, 14 e 18) e la configurazione nginx d'esempio.
 
 ## Monitoraggio continuo
 

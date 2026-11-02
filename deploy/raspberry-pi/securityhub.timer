@@ -1,10 +1,12 @@
-# /etc/systemd/system/securityhub.timer - one run per day
+# /etc/systemd/system/securityhub.timer - four runs per day, around 06:00, 10:00, 14:00 and 18:00
 [Unit]
-Description=Security Hub - daily run
+Description=Security Hub - runs around 06:00, 10:00, 14:00 and 18:00
 
 [Timer]
-OnCalendar=*-*-* 05:40
-RandomizedDelaySec=15min
+# start between 5 minutes before and 5 minutes after the hour (spreads the load on DNS and APIs)
+OnCalendar=*-*-* 05:55,09:55,13:55,17:55
+RandomizedDelaySec=10min
+# a run missed while the Pi was off starts at boot
 Persistent=true
 
 [Install]

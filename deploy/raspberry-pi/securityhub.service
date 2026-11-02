@@ -1,4 +1,4 @@
-# /etc/systemd/system/securityhub.service - Security Hub daily assessment (started by securityhub.timer)
+# /etc/systemd/system/securityhub.service - Security Hub assessment (started by securityhub.timer, 4 times a day)
 [Unit]
 Description=Security Hub - security posture assessment
 Wants=network-online.target time-sync.target
@@ -15,7 +15,8 @@ WorkingDirectory=/opt/securityhub/config
 ExecStart=/opt/securityhub/venv/bin/securityhub run -q -c /opt/securityhub/config/securityhub.yaml
 # 2 = a score below fail_under: an assessment result, not a service failure
 SuccessExitStatus=2
-TimeoutStartSec=4h
+# runs start every 4 hours: a stuck run is stopped before the next one is due
+TimeoutStartSec=3h
 # low priority: the scan uses spare CPU and disk only, SSH and other services stay responsive
 Nice=15
 CPUWeight=20
