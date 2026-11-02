@@ -8,6 +8,7 @@ import os
 import sys
 import time
 from collections import Counter
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional
 
@@ -16,6 +17,7 @@ from .analysis import analyze_snapshot, compute_diff, load_metadata
 from .api import ImpervaAPI, collect
 from .constants import CHECKS, DDOS_FACTOR, DDOS_FLOOR, __version__, parse_checks
 from .exports import write_csv, write_json
+from . import cache as wafcache
 from .probe import probe_site
 from .report import generate_html_report
 
@@ -63,8 +65,15 @@ Exit codes: 0 ok, 1 usage/API error, 2 a website scored below --fail-under, 130 
     p.add_argument("--ddos-factor", type=float, default=DDOS_FACTOR, help=f"Recommended threshold = factor x peak rps (default: {DDOS_FACTOR})")
     p.add_argument("--ddos-floor", type=int, default=DDOS_FLOOR, help=f"Minimum recommended threshold (default: {DDOS_FLOOR})")
     p.add_argument("--baseline", help="Previous JSON export to compare with")
-    p.add_argument("--workers", type=int, default=8, help="Parallel API calls / probes (default: 8)")
-    p.add_argument("--qps", type=float, default=8.0, help="Max API requests per second (default: 8)")
+    p.add_argument("--workers", type=int, default=4, help="Parallel API calls (default: 4)")
+    p.add_argument("--qps", type=float, default=5.0, help="Max API requests per second (default: 5)")
+    p.add_argument("--probe-workers", type=int, default=4, help="Websites probed from the Internet at the same time (default: 4)")
+    p.add_argument("--traffic-max-age", type=float, default=24.0,
+                   help="Reuse traffic statistics younger than N hours (default: 24; 0 = always download)")
+    p.add_argument("--probe-max-age", type=float, default=24.0,
+                   help="Reuse legacy-TLS and origin probes younger than N hours (default: 24; 0 = always probe)")
+    p.add_argument("--cache-file", help="Cache of traffic statistics and probes (default: ~/.cache/securityhub/waf-<account>.json)")
+    p.add_argument("--no-cache", action="store_true", help="Do not read or write the cache")
     p.add_argument("--timeout", type=float, default=30.0, help="API timeout in seconds (default: 30)")
     p.add_argument("--v1-base", default="https://my.imperva.com", help=argparse.SUPPRESS)
     p.add_argument("--api-base", default="https://api.imperva.com", help=argparse.SUPPRESS)
@@ -94,6 +103,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             return EXIT_USAGE
 
     t0 = time.monotonic()
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat(timespec="seconds")
+    cache, cache_file = {"traffic": {}, "probes": {}}, None
     if args.from_json:
         try:
             with open(args.from_json, encoding="utf-8") as f:
@@ -124,9 +136,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         api = ImpervaAPI(args.api_id, api_key, args.v1_base, args.api_base, args.timeout, args.qps,
                          verify_tls=not args.insecure)
         log(f"Reading Imperva configuration (account {args.account_id}{', with sub-accounts' if args.include_subaccounts else ''})...")
+        if not args.no_cache:
+            cache_file = args.cache_file or wafcache.cache_path(args.account_id)
+            cache = wafcache.load(cache_file)
+        traffic_days = 0 if args.no_traffic else max(1, args.traffic_days)
+        reuse = {sid: e["data"] for sid, e in cache["traffic"].items()
+                 if e.get("days") == traffic_days and wafcache.fresh(e, args.traffic_max_age, now)}
         try:
             snap = collect(api, args.account_id, args.include_subaccounts, site_filter, args.workers, log,
-                           0 if args.no_traffic else max(1, args.traffic_days))
+                           traffic_days, reuse)
         except KeyboardInterrupt:
             print("\nInterrupted.", file=sys.stderr)
             return EXIT_INTERRUPTED
@@ -135,6 +153,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"Error: {auth_errors[0]['error']}", file=sys.stderr)
             return EXIT_USAGE
         source = f"Imperva API, account {args.account_id}, {api.stats['requests']} requests"
+        for acc in snap["accounts"]:
+            for sid, t in (acc.get("traffic") or {}).items():
+                if sid not in reuse and t and "error" not in t:
+                    cache["traffic"][sid] = {"at": now_iso, "days": traffic_days, "data": t}
+        if snap.get("traffic_reused"):
+            log(f"  traffic statistics of {snap['traffic_reused']} website(s) reused (younger than {args.traffic_max_age:g}h)")
 
     sites = [(acc, s) for acc in snap.get("accounts", []) for s in acc.get("sites", [])]
     if not sites:
@@ -142,18 +166,46 @@ def main(argv: Optional[List[str]] = None) -> int:
         return EXIT_USAGE
 
     probes: Dict[str, dict] = dict(snap.get("probes") or {})
+    probes_reused = 0
     if args.probe:
         log(f"Testing {len(sites)} website(s) from the Internet...")
-        with ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:
-            futs = {ex.submit(probe_site, s): str(s.get("site_id")) for _, s in sites}
+        cached_heavy: Dict[str, dict] = {}
+        for _, s in sites:
+            sid = str(s.get("site_id"))
+            e = cache["probes"].get(sid)
+            if wafcache.fresh(e, args.probe_max_age, now, wafcache.probe_key(s)):
+                cached_heavy[sid] = e
+
+        def run_probe(site: dict) -> dict:
+            sid = str(site.get("site_id"))
+            if sid in cached_heavy:  # light probe now, heavy part from a recent run
+                res = probe_site(site, heavy=False)
+                res.update(cached_heavy[sid]["heavy"])
+                res["heavy_at"] = cached_heavy[sid]["at"]
+                return res
+            return probe_site(site)
+
+        with ThreadPoolExecutor(max_workers=max(1, args.probe_workers)) as ex:
+            futs = {ex.submit(run_probe, s): (str(s.get("site_id")), s) for _, s in sites}
             for k, fut in enumerate(as_completed(futs), 1):
+                sid, site = futs[fut]
                 try:
-                    probes[futs[fut]] = fut.result()
+                    probes[sid] = fut.result()
+                    if sid not in cached_heavy and probes[sid].get("addresses"):
+                        cache["probes"][sid] = {"at": now_iso, "key": wafcache.probe_key(site),
+                                                "heavy": {k2: probes[sid].get(k2) for k2 in wafcache.HEAVY_PROBE_KEYS}}
                 except Exception as e:
-                    probes[futs[fut]] = {"error": str(e), "addresses": [], "origins": []}
+                    probes[sid] = {"error": str(e), "addresses": [], "origins": []}
                 if k % 10 == 0 or k == len(futs):
                     log(f"  probed {k}/{len(futs)}")
+        probes_reused = len(cached_heavy)
+        if probes_reused:
+            log(f"  legacy TLS and origin tests of {probes_reused} website(s) reused (younger than {args.probe_max_age:g}h)")
         snap["probes"] = probes
+    if cache_file:
+        problem = wafcache.save(cache_file, cache)
+        if problem:
+            print(f"Warning: cache not saved ({problem})", file=sys.stderr)
 
     if args.save_raw:
         try:
@@ -176,6 +228,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         notes.append("Internet tests were not run (--probe): origin exposure and DNS routing are not evaluated.")
     if snap.get("errors"):
         notes.append(f"{len(snap['errors'])} API call(s) failed: see the account findings.")
+    if snap.get("traffic_reused"):
+        notes.append(f"Traffic statistics of {snap['traffic_reused']} website(s) come from a run of the last "
+                     f"{args.traffic_max_age:g} hours (they only tune the DDoS threshold and change slowly).")
+    if probes_reused:
+        notes.append(f"Legacy TLS and origin exposure tests of {probes_reused} website(s) come from a run of the last "
+                     f"{args.probe_max_age:g} hours; DNS routing and HTTPS were tested now.")
     try:
         generate_html_report(results, account_issues, policy_rows, args.output,
                              {"checks": checks, "source": source, "diff": diff, "notes": notes,

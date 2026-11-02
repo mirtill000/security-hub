@@ -98,8 +98,11 @@ def _accepts_tls(host: str, version: ssl.TLSVersion, timeout: float) -> Optional
         return None
 
 
-def probe_site(site: dict, timeout: float = 6.0) -> dict:
-    """Read-only checks from the Internet. Origin probes only send one GET / per origin address."""
+def probe_site(site: dict, timeout: float = 6.0, heavy: bool = True) -> dict:
+    """Read-only checks from the Internet. Origin probes only send one GET / per origin address.
+
+    heavy=False skips the slow, rarely changing part (legacy TLS handshakes, origin servers): the caller
+    reuses a recent result for it (see cache.py)."""
     host = str(site.get("domain", "")).lower()
     res: Dict[str, Any] = {"host": host, "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     cnames, addrs = _resolve(host)
@@ -126,8 +129,11 @@ def probe_site(site: dict, timeout: float = 6.0) -> dict:
         loc = (http.get("headers") or {}).get("location", "")
         res["http_status"] = http.get("status")
         res["redirects_https"] = bool(http.get("status") in (301, 302, 307, 308) and loc.lower().startswith("https://"))
-        res["tls10"] = _accepts_tls(host, ssl.TLSVersion.TLSv1, timeout)
-        res["tls11"] = _accepts_tls(host, ssl.TLSVersion.TLSv1_1, timeout)
+        if heavy:
+            res["tls10"] = _accepts_tls(host, ssl.TLSVersion.TLSv1, timeout)
+            res["tls11"] = _accepts_tls(host, ssl.TLSVersion.TLSv1_1, timeout)
+    if not heavy:
+        return res
     origins = []
     for origin in (site.get("ips") or [])[:6]:
         origin = str(origin).strip()

@@ -218,6 +218,14 @@ tema del portale. La stampa e il PDF executive usano sempre la versione chiara.
   resta gestibile anche per router domestici e tabelle NAT piccole.
 - **Storico leggero**: per i trend il portale usa solo i KPI delle esecuzioni precedenti, i report completi sono caricati
   solo per l'ultima. Con 30 esecuzioni da 900 domini: picco di memoria da 722 MB a 65 MB.
+- **WAF: dati lenti in cache** (`~/.cache/securityhub/waf-<account>.json`): le statistiche di traffico (90 giorni,
+  servono solo a tarare la soglia DDoS) e la parte pesante delle sonde (handshake TLS 1.0/1.1, connessioni dirette
+  agli origin) si rifanno al massimo una volta ogni `traffic_max_age` / `probe_max_age` ore (default 24); la sonda
+  si rifà subito se cambiano dominio o origin del sito. Configurazione, policy, instradamento DNS e HTTPS si leggono
+  a ogni run. Con 4 run al giorno: download delle statistiche −75%, connessioni delle sonde circa −65%. Default più
+  prudenti: 4 chiamate API in parallelo a max 5 al secondo, 4 siti sondati alla volta. `--no-cache` per disattivarla.
+- **Moduli in sequenza**: `max_parallel` (default: tutti insieme). Su un Pi con molti domini e siti conviene
+  `max_parallel: 1` o `2`, così scansione DNS, sonde WAF e chiamate API non si sommano.
 - **Servizio a bassa priorità** (`deploy/raspberry-pi/securityhub.service`): `Nice`, `CPUWeight`, I/O `idle` e
   `MemoryHigh`, così SSH e gli altri servizi restano reattivi durante la scansione.
 

@@ -57,7 +57,7 @@ FORBIDDEN = {"api_key": "use the IMPERVA_API_KEY environment variable or api_key
              "secret": "use the PROOFPOINT_SECRET environment variable or secret_file"}
 # Option values that are paths: resolved relative to the configuration file.
 PATH_OPTIONS = {"input", "input_file", "metadata", "from_json", "save_raw", "api_key_file", "api_token_file", "inventory",
-                "domains", "secret_file",
+                "domains", "secret_file", "cache_file",
                 "selectors_file",
                 "psl_file", "dmarc_reports", "baseline", "config"}
 
@@ -120,6 +120,10 @@ modules:
       account_id: 1234567
       include_subaccounts: true
       probe: true                        # DNS routing, TLS and origin exposure checks
+      # traffic_max_age: 24              # hours: traffic statistics (DDoS tuning) are downloaded once a day
+      # probe_max_age: 24                # hours: legacy TLS and origin tests once a day (DNS and HTTPS every run)
+      # qps: 5                           # max API requests per second
+      # probe_workers: 4                 # websites probed at the same time
       csv: true
       # metadata: sites.csv              # tier/owner/bu/tags/max_rps per website
       # from_json: snapshot.json         # offline: analyze a saved snapshot instead of the API

@@ -14,7 +14,7 @@ import urllib.request
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from typing import Any, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ...common import RateLimiter
 from .constants import USER_AGENT, __version__
@@ -146,7 +146,9 @@ def fetch_traffic(api: ImpervaAPI, site_id: Any, days: int) -> dict:
 
 
 def collect(api: ImpervaAPI, account_id: Optional[int], include_subaccounts: bool, site_filter: Set[str],
-            workers: int, log, traffic_days: int = 90) -> dict:
+            workers: int, log, traffic_days: int = 90, traffic_cache: Optional[Dict[str, dict]] = None) -> dict:
+    """traffic_cache: site id -> recent traffic statistics to reuse instead of downloading them again."""
+    traffic_cache = traffic_cache or {}
     snap = {"tool": f"WAFGuard {__version__}", "collected": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "accounts": [], "errors": []}
 
@@ -220,7 +222,9 @@ def collect(api: ImpervaAPI, account_id: Optional[int], include_subaccounts: boo
                 applied = None
                 problem = (problem + "; " if problem else "") + f"applied policies: {e}"
             traffic = None
-            if traffic_days:
+            if traffic_days and str(sid) in traffic_cache:
+                traffic = traffic_cache[str(sid)]
+            elif traffic_days:
                 try:
                     traffic = fetch_traffic(api, sid, traffic_days)
                 except APIError as e:
@@ -244,4 +248,5 @@ def collect(api: ImpervaAPI, account_id: Optional[int], include_subaccounts: boo
         snap["accounts"].append({**acc, "sites": acc_sites, "policies": policies, "asset_policies": applied_map,
                                  "site_errors": problems, "traffic": traffic_map})
     snap["api_stats"] = dict(api.stats)
+    snap["traffic_reused"] = sum(1 for acc in snap["accounts"] for sid in (acc.get("traffic") or {}) if sid in traffic_cache)
     return snap
