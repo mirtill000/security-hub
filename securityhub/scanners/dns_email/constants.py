@@ -253,7 +253,9 @@ CHECKS: Dict[str, int] = {
     "takeover": 0, "axfr": 0, "consistency": 0, "lookalikes": 0,
 }
 # axfr is opt-in: it sends a zone transfer request to every authoritative name server (an active test).
-DEFAULT_CHECKS = ["mx", "spf", "dkim", "dmarc", "mta-sts", "tls-rpt", "bimi", "dnssec", "caa", "takeover"]
+# BIMI (brand logo) is not part of the assessment by default: it is a marketing feature, not a protection.
+# It can still be requested explicitly (--checks all,bimi or full).
+DEFAULT_CHECKS = ["mx", "spf", "dkim", "dmarc", "mta-sts", "tls-rpt", "dnssec", "caa", "takeover"]
 CHECK_ALIASES = {
     "mtasts": "mta-sts", "mta_sts": "mta-sts", "sts": "mta-sts",
     "tlsrpt": "tls-rpt", "tls_rpt": "tls-rpt", "tls": "tls-rpt",

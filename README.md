@@ -5,7 +5,7 @@ Monitoraggio della **security posture** su più aree (e-mail, DNS, Proofpoint, W
 | Area | Modulo | Cosa valuta | Sorgente dati |
 |------|--------|-------------|---------------|
 | **WAF** | `securityhub waf` (WAFGuard) | Configurazione Imperva Cloud WAF: onboarding, regole OWASP in blocco, eccezioni, allow-list, bot, DDoS, TLS, esposizione dell'origin | API Imperva (sola lettura) o snapshot JSON |
-| **E-mail** | `securityhub email` (MailGuard) | MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI, report DMARC aggregati | DNS live (+ HTTPS per MTA-STS) |
+| **E-mail** | `securityhub email` (MailGuard) | MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, report DMARC aggregati (BIMI solo su richiesta: `--checks all,bimi`) | DNS live (+ HTTPS per MTA-STS) |
 | **DNS** | `securityhub dns` (MailGuard) | DNSSEC, CAA, takeover delle dipendenze, scadenza registrazioni, zone transfer (AXFR, opt-in), coerenza resolver, lookalike | DNS live (+ RDAP) |
 | **Proofpoint** | `securityhub proofpoint` (PPGuard) | Posta che passa davvero da Proofpoint (MX, MX di bypass, consegna diretta a Microsoft 365, SPF) e, da TAP, minacce consegnate, click malevoli permessi, URL Defense, Very Attacked People e top clicker | DNS pubblico + API TAP (sola lettura) o snapshot JSON |
 | **EDR** | `securityhub edr` (EDRGuard) | SentinelOne: salute e versione degli agent, Protect vs Detect, anti-tamper, motori, snapshot, minacce aperte e SLA, esclusioni rischiose, copertura rispetto all'inventario | API SentinelOne v2.1 (sola lettura) o snapshot JSON |
@@ -175,7 +175,7 @@ nel portale:
 
 | Report | Comando / modulo | Controlli | Punteggio |
 |---|---|---|---|
-| **Email security** | `securityhub email` | MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI, report DMARC; requisiti Gmail/Yahoo e Microsoft | SPF 25, DKIM 25, DMARC 35, MTA-STS 7, TLS-RPT 3 (normalizzato a 100) |
+| **Email security** | `securityhub email` | MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, report DMARC; requisiti Gmail/Yahoo e Microsoft; BIMI solo su richiesta | SPF 25, DKIM 25, DMARC 35, MTA-STS 7, TLS-RPT 3 (normalizzato a 100) |
 | **DNS security** | `securityhub dns` | DNSSEC, CAA, takeover e scadenza registrazioni; opzionali: zone transfer (`axfr`), coerenza, lookalike | DNSSEC 30, CAA 25, takeover 30, zone transfer 15; i controlli non misurabili sono esclusi dal massimo |
 
 Ciascun comando accetta solo i propri controlli (`securityhub email --checks caa` suggerisce `securityhub dns`).

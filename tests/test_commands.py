@@ -32,7 +32,16 @@ class CommandsTest(TempDirTest):
         code, _ = self.run_cmd("email", fixture("domains.csv"), "-o", self.path("e.html"), "--json")
         self.assertEqual(code, EXIT_OK)
         self.assertEqual(sorted(os.listdir(self.tmp)), ["e.html", "e.json"])
-        self.assertEqual(checks_of(self.path("e.html")), ["mx", "spf", "dkim", "dmarc", "mta-sts", "tls-rpt", "bimi"])
+        self.assertEqual(checks_of(self.path("e.html")), ["mx", "spf", "dkim", "dmarc", "mta-sts", "tls-rpt"])
+
+    def test_bimi_only_on_request(self):
+        self.run_cmd("email", fixture("domains.csv"), "-o", self.path("e.html"), "--json")
+        with open(self.path("e.json"), encoding="utf-8") as f:
+            rows = json.load(f)["results"]
+        self.assertTrue(all(r["bimi"]["status"] == "skipped" for r in rows))
+        self.assertFalse(any(i["code"].startswith("BIMI") for r in rows for i in r["issues"]))
+        self.run_cmd("email", fixture("domains.csv"), "-o", self.path("b.html"), "--checks", "all,bimi")
+        self.assertEqual(checks_of(self.path("b.html"))[-1], "bimi")
 
     def test_dns_command_writes_one_dns_report(self):
         code, _ = self.run_cmd("dns", fixture("domains.csv"), "-o", self.path("d.html"), "--checks", "all,axfr")

@@ -93,10 +93,10 @@ def print_timing_summary(results: List[DomainResult], top: int = 5) -> None:
 
 COMMANDS = {
     "email": {
-        "description": "E-mail security of a domain portfolio via live DNS (MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI, "
+        "description": "E-mail security of a domain portfolio via live DNS (MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, "
                        "DMARC aggregate reports)",
         "output": "email_report.html",
-        "checks": "mx, spf, dkim, dmarc, mta-sts, tls-rpt, bimi (= 'all', the default)",
+        "checks": "mx, spf, dkim, dmarc, mta-sts, tls-rpt (= 'all', the default); bimi only on request (all,bimi)",
     },
     "dns": {
         "description": "DNS security of a domain portfolio via live DNS (DNSSEC, CAA, dependency takeover and "
@@ -139,7 +139,7 @@ Exit codes: 0 ok, 1 usage/input/resolver error, 2 a domain scored below --fail-u
                             help="One report with every e-mail and DNS check (as before version 4)")
     parser.add_argument("-c", "--checks", default="all",
                         help="Checks to run, comma-separated: " + ",".join(CHECKS) + ", all, full (default: all)")
-    parser.add_argument("--skip", default="", help="Checks to exclude, e.g. --skip dkim,bimi")
+    parser.add_argument("--skip", default="", help="Checks to exclude, e.g. --skip dkim,tls-rpt")
     parser.add_argument("-t", "--timeout", type=float, default=5.0, help="Per-query DNS/HTTP timeout in seconds (default: 5)")
     parser.add_argument("-w", "--workers", type=int, default=10, help="Domains analyzed in parallel (default: 10)")
     parser.add_argument("-j", "--json", action="store_true", help="Also write JSON results")

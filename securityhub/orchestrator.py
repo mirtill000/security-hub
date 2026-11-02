@@ -88,7 +88,7 @@ modules:
     enabled: true
     input: domains.csv                   # a plain list of domains is enough; tier/owner/bu/tags columns are optional
     options:
-      checks: all                        # mx, spf, dkim, dmarc, mta-sts, tls-rpt, bimi
+      checks: all                        # mx, spf, dkim, dmarc, mta-sts, tls-rpt (bimi only on request: all,bimi)
       csv: true
       # dmarc_reports: [./rua]           # DMARC aggregate reports (.xml/.gz/.zip/.eml)
       # full_dkim: true                  # probe every DKIM selector (complete audit, slower; e.g. once a month)
