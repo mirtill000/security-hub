@@ -25,6 +25,59 @@ def _broad_cidr(value: str, v4_prefix: int, v6_prefix: int) -> bool:
     return net.prefixlen <= (v4_prefix if net.version == 4 else v6_prefix)
 
 
+# Policy exception conditions (Imperva "exceptionType"). The conditions of one exception apply TOGETHER (AND):
+# the exception is broad only when no condition narrows it to specific requests.
+ASSET_CONDITIONS = {"SITE_ID", "ASSET_ID", "SITE", "ASSET", "ASSETS"}
+GEO_CONDITIONS = {"COUNTRY", "CONTINENT", "GEO"}
+CONDITION_LABELS = {"URL": "URL is", "IP": "IPs", "COUNTRY": "Countries", "CONTINENT": "Continents", "GEO": "Countries",
+                    "SITE_ID": "Assets", "ASSET_ID": "Assets", "SITE": "Assets", "ASSET": "Assets", "ASSETS": "Assets",
+                    "CLIENT_ID": "Client", "CLIENT_APP_TYPE": "Client type", "PARAMETER": "Parameter", "COOKIE": "Cookie",
+                    "USER_AGENT": "User agent", "HEADER": "Header", "HEADER_NAME": "Header"}
+ANY_URL = ("", "/", "*", "/*")
+
+
+def assess_exception(exc: dict, site_id: Any = None) -> Optional[dict]:
+    """One policy exception as seen by `site_id`: None when its asset condition excludes that website."""
+    conds = []
+    for d in exc.get("data") or []:
+        etype = str(d.get("exceptionType") or "").upper()
+        values = [str(v).strip() for v in d.get("values") or []]
+        conds.append((etype, values))
+    assets = [v for t, vals in conds if t in ASSET_CONDITIONS for v in vals]
+    if assets and site_id is not None and str(site_id) not in assets:
+        return None
+    narrowing, why = [], []
+    for t, vals in conds:
+        if t in ASSET_CONDITIONS:
+            continue
+        if t.startswith("URL"):
+            if vals and not any(v in ANY_URL for v in vals):
+                narrowing.append(t)
+            else:
+                why.append("any URL")
+        elif t == "IP":
+            if vals and not any(_broad_cidr(v, 16, 32) for v in vals):
+                narrowing.append(t)
+            else:
+                why.append("very broad IP range")
+        elif t in GEO_CONDITIONS:
+            why.append("whole " + ("continent" if t == "CONTINENT" else "country"))
+        elif vals:  # parameter, cookie, header, user agent, client: specific requests only
+            narrowing.append(t)
+    if not conds or (not narrowing and not why):
+        why.append("no condition" if not [c for c in conds if c[0] not in ASSET_CONDITIONS] else "no specific condition")
+    labels = []
+    for t, _ in conds:
+        lab = CONDITION_LABELS.get(t, t.replace("_", " ").capitalize() or "Any")
+        if lab not in labels:
+            labels.append(lab)
+    return {"type": " + ".join(labels) or "Any request",
+            "values": [f"{CONDITION_LABELS.get(t, t)}: {', '.join(vals[:5])}{' ...' if len(vals) > 5 else ''}" for t, vals in conds],
+            "scope": f"asset {', '.join(assets)}" if assets else "all assets using the policy",
+            "comment": exc.get("comment") or "", "broad": not narrowing,
+            "why": ", ".join(why) if not narrowing else ""}
+
+
 def _status_from(issues: List[Issue], default: str = "valid") -> str:
     sev = {i.severity for i in issues}
     return "error" if "critical" in sev else "warning" if "warning" in sev else default
@@ -103,14 +156,11 @@ def check_waf(site: dict, policies: List[dict]) -> CheckResult:
                             "exceptions": len(excs)}
             elif t == "RESP_DATA_LEAK":
                 data_leak = act
-            for exc in excs:
-                for d in exc.get("data") or []:
-                    etype = str(d.get("exceptionType") or "").upper()
-                    values = [str(v) for v in d.get("values") or []]
-                    broad = (etype == "URL" and any(v.strip() in ("", "/", "*", "/*") for v in values)) or \
-                            (etype == "IP" and any(_broad_cidr(v, 16, 32) for v in values)) or etype == "GEO"
-                    exceptions.append({"rule": CORE_RULES.get(t, t), "type": etype, "values": values[:20],
-                                       "comment": exc.get("comment") or "", "broad": broad})
+            applied = [e for e in (assess_exception(x, site.get("site_id")) for x in excs) if e]
+            if t in CORE_RULES:
+                rules[t]["exceptions"] = len(applied)
+            for e in applied:
+                exceptions.append({"rule": CORE_RULES.get(t, t), **e})
     else:
         for rid, core in V1_RULE_IDS.items():
             r = legacy.get(rid)
@@ -161,7 +211,7 @@ def check_waf(site: dict, policies: List[dict]) -> CheckResult:
         c.got += max(0, 4 - 2 * len(broad))
         if broad:
             c.issues.append(make_issue("WAF_BROAD_EXCEPTION", ", ".join(
-                f"{e['rule']} {e['type']} {','.join(e['values'][:2]) or '(any)'}" for e in broad[:3])))
+                f"{e['rule']}: {e['why']}" + (f" ({'; '.join(e['values'][:2])})" if e['values'] else "") for e in broad[:3])))
         undocumented = [e for e in exceptions if not e["comment"]]
         if undocumented:
             c.issues.append(make_issue("WAF_EXCEPTION_NO_COMMENT", f"{len(undocumented)} of {len(exceptions)}"))
