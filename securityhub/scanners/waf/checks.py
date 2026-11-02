@@ -359,6 +359,58 @@ def recommend_threshold(peak: float, factor: float, floor: int, origin_max: Opti
     return rec, why
 
 
+def _adaptive_value(v: Any) -> Optional[bool]:
+    if isinstance(v, bool):
+        return v
+    t = str(v).strip().lower()
+    if t in ("", "none", "null"):
+        return None
+    if "adaptive" in t or t in ("true", "1", "yes", "on", "enabled", "enable"):
+        return True
+    if t in ("false", "0", "no", "off", "disabled", "disable"):
+        return False
+    return None
+
+
+def ddos_adaptive(site: dict) -> Optional[bool]:
+    """True when the DDoS threshold is adaptive (Imperva tunes it from the site's own traffic), False when a fixed
+    threshold is set, None when the snapshot does not say. Read from the DDoS rule (an 'adaptive' parameter,
+    or 'adaptive' in the activation mode or threshold value) and from DDoS settings elsewhere in the site."""
+    r = _legacy_rules(site).get("api.threats.ddos") or {}
+    for k, v in r.items():
+        if "adaptive" in str(k).lower():
+            got = _adaptive_value(v)
+            if got is not None:
+                return got
+    for k in ("activation_mode", "activation_mode_text", "ddos_traffic_threshold", "ddos_traffic_threshold_text"):
+        if "adaptive" in str(r.get(k) or "").lower():
+            return True
+
+    def walk(node: Any, path: str, depth: int) -> Optional[bool]:
+        if depth > 4:
+            return None
+        if isinstance(node, dict):
+            for k, v in node.items():
+                key = f"{path}.{k}".lower()
+                if "adaptive" in str(k).lower() and "ddos" in key and not isinstance(v, (dict, list)):
+                    got = _adaptive_value(v)
+                    if got is not None:
+                        return got
+                got = walk(v, key, depth + 1)
+                if got is not None:
+                    return got
+        elif isinstance(node, list):
+            for v in node:
+                got = walk(v, path, depth + 1)
+                if got is not None:
+                    return got
+        return None
+    found = walk({k: v for k, v in site.items() if k != "security"}, "site", 0)
+    if found is not None:
+        return found
+    return False if r.get("ddos_traffic_threshold") not in (None, "") else None
+
+
 def check_ddos(site: dict, traffic: Optional[dict] = None, origin_max: Optional[float] = None,
                factor: float = DDOS_FACTOR, floor: int = DDOS_FLOOR) -> CheckResult:
     c = CheckResult(max=10)
@@ -369,8 +421,9 @@ def check_ddos(site: dict, traffic: Optional[dict] = None, origin_max: Optional[
         return c
     mode = str(r.get("activation_mode") or "").lower()
     label = r.get("activation_mode_text") or mode.rsplit(".", 1)[-1]
+    adaptive = ddos_adaptive(site) is True
     try:
-        threshold = int(r.get("ddos_traffic_threshold") or 0)
+        threshold = 0 if adaptive else int(r.get("ddos_traffic_threshold") or 0)
     except (TypeError, ValueError):
         threshold = 0
     mode_off = mode.endswith(".off") or mode == "off"
@@ -378,7 +431,16 @@ def check_ddos(site: dict, traffic: Optional[dict] = None, origin_max: Optional[
         c.issues.append(make_issue("DDOS_OFF"))
     else:
         c.got = 10
-    c.data = {"mode": label, "threshold": threshold or None, "origin_max_rps": origin_max}
+    c.data = {"mode": label, "threshold": threshold or None, "origin_max_rps": origin_max, "adaptive": adaptive}
+    if adaptive:
+        # Imperva sets the threshold from the site's own traffic: comparing it with a fixed value makes no sense.
+        profile = traffic_profile(traffic)
+        if profile is not None:
+            c.data["traffic"] = profile
+            if profile["ddos_incidents"]:
+                c.issues.append(make_issue("DDOS_ACTIVATIONS", f"{profile['ddos_incidents']} incident(s) in {profile['days']} days"))
+        c.status = _status_from(c.issues)
+        return c
     profile = traffic_profile(traffic)
     if profile is None:
         if traffic is not None:

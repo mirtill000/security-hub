@@ -4,7 +4,7 @@ Monitoraggio della **security posture** su più aree (e-mail, DNS, Proofpoint, W
 
 | Area | Modulo | Cosa valuta | Sorgente dati |
 |------|--------|-------------|---------------|
-| **WAF** | `securityhub waf` (WAFGuard) | Configurazione Imperva Cloud WAF: onboarding, regole OWASP in blocco, eccezioni, allow-list, bot, DDoS, TLS, esposizione dell'origin | API Imperva (sola lettura) o snapshot JSON |
+| **WAF** | `securityhub waf` (WAFGuard) | Configurazione Imperva Cloud WAF: onboarding, regole OWASP in blocco, eccezioni, allow-list, bot, DDoS (soglia confrontata con il traffico reale, salvo soglia adattiva), TLS, esposizione dell'origin | API Imperva (sola lettura) o snapshot JSON |
 | **E-mail** | `securityhub email` (MailGuard) | MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, report DMARC aggregati (BIMI solo su richiesta: `--checks all,bimi`) | DNS live (+ HTTPS per MTA-STS) |
 | **DNS** | `securityhub dns` (MailGuard) | DNSSEC, CAA, takeover delle dipendenze, scadenza registrazioni, zone transfer (AXFR, opt-in), coerenza resolver, lookalike | DNS live (+ RDAP) |
 | **Proofpoint** | `securityhub proofpoint` (PPGuard) | Posta che passa davvero da Proofpoint (MX, MX di bypass, consegna diretta a Microsoft 365, SPF) e, da TAP, minacce consegnate, click malevoli permessi, URL Defense, Very Attacked People e top clicker | DNS pubblico + API TAP (sola lettura) o snapshot JSON |
@@ -235,7 +235,7 @@ tema del portale. La stampa e il PDF executive usano sempre la versione chiara.
   girano uno alla volta (`max_parallel_network`, default 1); quelli che fanno solo poche chiamate API restano in
   parallelo.
 - **WAF: dati lenti in cache** (`~/.cache/securityhub/waf-<account>.json`): le statistiche di traffico (90 giorni,
-  servono solo a tarare la soglia DDoS) e la parte pesante delle sonde (handshake TLS 1.0/1.1, connessioni dirette
+  servono solo a tarare la soglia DDoS, e non si scaricano per i siti con soglia DDoS adattiva) e la parte pesante delle sonde (handshake TLS 1.0/1.1, connessioni dirette
   agli origin) si rifanno al massimo una volta ogni `traffic_max_age` / `probe_max_age` ore (default 24); la sonda
   si rifà subito se cambiano dominio o origin del sito. Configurazione, policy, instradamento DNS e HTTPS si leggono
   a ogni run. Con 4 run al giorno: download delle statistiche −75%, connessioni delle sonde circa −65%. Default più

@@ -27,7 +27,7 @@ const DETAIL = {
   onboarding: r => r.active === 'bypass' ? 'bypass' : '',
   waf: r => { const rs = cd(r, 'waf').rules || []; return rs.length ? `${rs.filter(x => BLOCKING.includes(x.action)).length}/4 blocking` : ''; },
   allowlist: r => { const n = cd(r, 'allowlist').allowed_ip_count; return n ? `${n} IPs` : ''; },
-  ddos: r => { const d = cd(r, 'ddos'); return d.recommended && d.threshold && d.recommended !== d.threshold ? `${d.threshold} \u2192 ${d.recommended} rps` : d.threshold ? `${d.mode || ''} ${d.threshold} rps`.trim() : (d.mode || ''); },
+  ddos: r => { const d = cd(r, 'ddos'); if (d.adaptive) return 'adaptive threshold'; return d.recommended && d.threshold && d.recommended !== d.threshold ? `${d.threshold} \u2192 ${d.recommended} rps` : d.threshold ? `${d.mode || ''} ${d.threshold} rps`.trim() : (d.mode || ''); },
   tls: r => { const d = cd(r, 'tls'); return d.days_left !== undefined && d.days_left !== null ? `${d.days_left} days` : ''; }
 };
 R.forEach((r, i) => {
@@ -414,11 +414,11 @@ function tabConfig(r) {
   if (vis(r, 'bots')) { const d = cd(r, 'bots'); bd.push(kv('Block bad bots', yesNo(d.block_bad_bots)), kv('Challenge suspected bots', yesNo(d.challenge_suspected_bots))); }
   if (bd.length) h += sec('bots', 'Bot access control', `<div class="kv">${bd.join('')}</div>`, pill(r._st('bots')));
   if (vis(r, 'ddos')) { const d = cd(r, 'ddos'), t = d.traffic;
-    h += sec('ddos', 'DDoS protection', `<div class="kv">${kv('Activation mode', d.mode)}${kv('Current threshold', d.threshold ? d.threshold + ' req/s' : '')}
-      ${t ? kv('Recommended threshold', d.recommended + ' req/s', d.recommended === d.threshold ? 'score hi' : '') + kv('Peak legitimate traffic', `${t.peak} req/s`) + kv('Peak at', t.peak_at + ' UTC')
+    h += sec('ddos', 'DDoS protection', `<div class="kv">${kv('Activation mode', d.mode)}${kv('Current threshold', d.adaptive ? 'Adaptive (set by Imperva from the site traffic)' : d.threshold ? d.threshold + ' req/s' : '')}
+      ${t && !d.adaptive ? kv('Recommended threshold', d.recommended + ' req/s', d.recommended === d.threshold ? 'score hi' : '') + kv('Peak legitimate traffic', `${t.peak} req/s`) + kv('Peak at', t.peak_at + ' UTC')
         + kv('Peak vs threshold', d.peak_ratio !== undefined ? d.peak_ratio + '%' : '', d.peak_ratio >= 90 ? 'score lo' : '') + kv('95th percentile', `${t.p95} req/s`) + kv('Average', `${t.avg} req/s`)
         + kv('Blocked peak', `${t.blocked_peak} req/s`) + kv('DDoS incidents', t.ddos_incidents) : ''}${kv('Origin capacity', d.origin_max_rps ? d.origin_max_rps + ' req/s' : 'not provided')}</div>
-      ${t ? ddosChart(d) + `<p class="sub" style="margin-top:8px">Last ${esc(t.days)} days, ${t.granularity_s ? (t.granularity_s >= 86400 ? Math.round(t.granularity_s / 86400) + '-day' : Math.round(t.granularity_s / 3600) + '-hour') : 'default'} buckets (${t.points} points)${d.coarse ? ': coarse data, the API did not accept hourly granularity, so peaks are strongly smoothed' : ''}. Values are averages per bucket: short bursts are higher. Recommended: ${esc(d.recommended_why)}.</p>`
+      ${d.adaptive ? '<p class="sub" style="margin-top:10px">Adaptive protection: Imperva derives the activation threshold from the site\'s own traffic, so it is not compared with a fixed value.</p>' : t ? ddosChart(d) + `<p class="sub" style="margin-top:8px">Last ${esc(t.days)} days, ${t.granularity_s ? (t.granularity_s >= 86400 ? Math.round(t.granularity_s / 86400) + '-day' : Math.round(t.granularity_s / 3600) + '-hour') : 'default'} buckets (${t.points} points)${d.coarse ? ': coarse data, the API did not accept hourly granularity, so peaks are strongly smoothed' : ''}. Values are averages per bucket: short bursts are higher. Recommended: ${esc(d.recommended_why)}.</p>`
         : '<p class="sub" style="margin-top:10px">Traffic statistics not available: the threshold could not be compared with real traffic.</p>'}`, pill(r._st('ddos'))); }
   if (vis(r, 'tls')) { const d = cd(r, 'tls');
     h += sec('tls', 'TLS', `<div class="kv">${kv('Certificate', d.certificate)}${kv('Expires', d.expires)}${kv('Days left', d.days_left)}${kv('Validation', d.validation)}${kv('TLS to origin', yesNo(d.origin_tls))}

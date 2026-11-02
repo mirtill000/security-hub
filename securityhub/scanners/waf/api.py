@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ...common import RateLimiter
+from .checks import ddos_adaptive
 from .constants import USER_AGENT, __version__
 
 
@@ -222,7 +223,9 @@ def collect(api: ImpervaAPI, account_id: Optional[int], include_subaccounts: boo
                 applied = None
                 problem = (problem + "; " if problem else "") + f"applied policies: {e}"
             traffic = None
-            if traffic_days and str(sid) in traffic_cache:
+            if ddos_adaptive(full) is True:
+                pass  # adaptive DDoS threshold: the traffic statistics would only tune a fixed threshold
+            elif traffic_days and str(sid) in traffic_cache:
                 traffic = traffic_cache[str(sid)]
             elif traffic_days:
                 try:

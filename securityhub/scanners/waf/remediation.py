@@ -50,7 +50,9 @@ def suggest_remediation(r: SiteResult) -> List[dict]:
         title = "Turn DDoS protection on" if "DDOS_OFF" in codes else f"Set the DDoS threshold to {value} requests/s"
         note = (f"Recommended {recommended}: {ddos.data.get('recommended_why')}. " if recommended else
                 "No traffic data: pick a threshold just above normal peak traffic. ") + \
-               "Re-check after seasonal peaks (sales, campaigns) and keep it below what the origin can serve."
+               "Re-check after seasonal peaks (sales, campaigns) and keep it below what the origin can serve." + \
+               ("" if "DDOS_OFF" in codes else " Alternative: enable the adaptive DDoS threshold, if your plan includes it - "
+                "Imperva then derives it from the site's traffic and no fixed value needs tuning.")
         rec(title, "incapsula_waf_security_rule",
             f'resource "incapsula_waf_security_rule" "ddos_{key}" {{\n  site_id                = "{sid}"\n'
             '  rule_id                = "api.threats.ddos"\n'
