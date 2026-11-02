@@ -1,12 +1,13 @@
 # Security Hub
 
-Monitoraggio della **security posture** su più aree (e-mail, DNS, WAF, EDR, Zero Trust), con un unico comando e un unico portale:
+Monitoraggio della **security posture** su più aree (e-mail, DNS, Proofpoint, WAF, EDR, Zero Trust), con un unico comando e un unico portale:
 
 | Area | Modulo | Cosa valuta | Sorgente dati |
 |------|--------|-------------|---------------|
 | **WAF** | `securityhub waf` (WAFGuard) | Configurazione Imperva Cloud WAF: onboarding, regole OWASP in blocco, eccezioni, allow-list, bot, DDoS, TLS, esposizione dell'origin | API Imperva (sola lettura) o snapshot JSON |
 | **E-mail** | `securityhub email` (MailGuard) | MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI, report DMARC aggregati | DNS live (+ HTTPS per MTA-STS) |
 | **DNS** | `securityhub dns` (MailGuard) | DNSSEC, CAA, takeover delle dipendenze, scadenza registrazioni, zone transfer (AXFR, opt-in), coerenza resolver, lookalike | DNS live (+ RDAP) |
+| **Proofpoint** | `securityhub proofpoint` (PPGuard) | Posta che passa davvero da Proofpoint (MX, MX di bypass, consegna diretta a Microsoft 365, SPF) e, da TAP, minacce consegnate, click malevoli permessi, URL Defense, Very Attacked People e top clicker | DNS pubblico + API TAP (sola lettura) o snapshot JSON |
 | **EDR** | `securityhub edr` (EDRGuard) | SentinelOne: salute e versione degli agent, Protect vs Detect, anti-tamper, motori, snapshot, minacce aperte e SLA, esclusioni rischiose, copertura rispetto all'inventario | API SentinelOne v2.1 (sola lettura) o snapshot JSON |
 | **Zero Trust** | `securityhub zta` (ZTAGuard) | Risultati del Microsoft Zero Trust Assessment per pilastro, priorità, quick win | `ZeroTrustAssessmentReport.json` |
 | **Portale** | `securityhub portal` (GuardHub) | Un solo file HTML con stato per area, KPI, piano d'azione trasversale, **vista per asset**, trend storici e i report navigabili | Report HTML generati dai moduli |
@@ -275,6 +276,41 @@ inviato a un SIEM o a una dashboard.
 - **Esecuzioni sovrapposte.** Un lock sulla cartella di output impedisce due `run` contemporanei (il secondo termina
   con un errore che indica chi tiene il lock); portale e `posture.json` sono scritti in modo atomico.
 
+## Proofpoint
+
+`securityhub proofpoint` (alias `pp`, `tap`) valuta ogni **dominio di posta** su due fronti:
+
+1. **Instradamento, dal DNS pubblico** (nessuna credenziale): la posta passa davvero da Proofpoint?
+2. **Esposizione, dall'API TAP** (sola lettura): cosa è arrivato agli utenti e chi ha cliccato.
+
+```bash
+export PROOFPOINT_PRINCIPAL=...  PROOFPOINT_SECRET=...      # service principal TAP (oppure --secret-file)
+securityhub proofpoint --domains domains.csv -o proofpoint.html --json --csv
+securityhub proofpoint --domains domains.csv --no-tap       # solo controlli DNS, senza credenziali
+securityhub proofpoint --save-raw pp.json                   # snapshot senza oggetti, corpi, IP dei click o URL malevoli
+securityhub proofpoint --from-json pp.json --baseline prev.json
+```
+
+La lista domini è la stessa del modulo email (semplice elenco o CSV con tier/owner/bu/tags).
+
+| Controllo | Peso | Cosa verifica |
+|-----------|-----:|---------------|
+| `routing` | 40 | Ogni MX è Proofpoint (per nome `*.pphosted.com`, per CNAME o per reverse DNS: riconosce anche MX con nome aziendale). MX alternativi = **bypass** (critico se preferito) |
+| `direct` | 10 | L'endpoint Microsoft 365 del dominio (`dominio-tld.mail.protection.outlook.com`) risponde: chi lo conosce invia direttamente e salta Proofpoint, a meno che Exchange Online accetti solo dal connettore Proofpoint. Da fuori non si vede: è un *da verificare* |
+| `spf` | 5 | SPF presente e, se la posta passa da Proofpoint, che lo autorizzi (anche tramite include annidati) |
+| `threats` | 25 | Messaggi malevoli (malware, phish) **consegnati** nella finestra TAP; consegne tramite safelist/allow; impostor (BEC) |
+| `clicks` | 20 | Click su URL malevoli **permessi**: utenti potenzialmente compromessi |
+| `rewrite`, `people` | info | Messaggi con URL non riscritti da URL Defense; Very Attacked People (VIP segnalati) |
+
+Profili: *Not routed via Proofpoint*, *MX bypass*, *Malicious click permitted*, *Threat delivered*, *Protected*.
+La pagina **People and threats** riporta i totali della finestra (bloccati / consegnati / click), le minacce arrivate agli
+utenti con il link al TAP dashboard, i Very Attacked People, i top clicker, i domini visti da TAP ma non in lista e
+quelli senza MX (non valutati). Le minacce su domini che non passano da Proofpoint sono *non applicabili*, non
+"pulite": TAP non le vede. Nel portale un click malevolo permesso rende l'area *At risk* e guida il piano d'azione.
+
+Il service principal si crea in TAP > Settings > Connected Applications. La finestra `--hours` (default 24, max 168)
+conviene sia pari all'intervallo tra due run; le chiamate SIEM sono una per ora (24 al giorno con il default).
+
 ## SentinelOne EDR
 
 `securityhub edr` (alias `s1`, `sentinelone`) legge la console SentinelOne con le API v2.1 **in sola lettura** e
@@ -321,6 +357,7 @@ securityhub dns domains.csv -o dns.html --json --csv --checks all,axfr
 securityhub waf --account-id 1234567 --include-subaccounts --probe --json
 securityhub waf --from-json snapshot.json --baseline last.json           # offline, da snapshot
 securityhub edr -o edr.html --json --inventory hosts.csv                # SentinelOne (S1_CONSOLE_URL, S1_API_TOKEN)
+securityhub proofpoint --domains domains.csv --json                     # Proofpoint (PROOFPOINT_PRINCIPAL/SECRET)
 securityhub zta ./ZeroTrustReport -o zta.html --json --baseline prev.json
 securityhub portal ./q1 ./q2 ./q3 -o security_hub.html --summary-json posture.json
 ```
@@ -349,12 +386,13 @@ securityhub/
   ui/                  design system condiviso di report e portale (assemblato in file HTML singoli e offline)
     base.css             token, layout e componenti comuni a tutte le pagine
     core.js, theme.js, report-core.js, asset-report.js   funzioni condivise (tutte le pagine / i 3 report / DNS e WAF)
-    dns|waf|edr|zta|portal.css|js, report.html, portal.html   parti specifiche
+    dns|waf|edr|proofpoint|zta|portal.css|js, report.html, portal.html   parti specifiche
   scanners/
     dns_email/         MailGuard DNS: constants, models, domains, dnsclient, rdap, fetch,
                        analyzer + checks_auth / checks_transport / checks_exposure / scoring,
                        lookalikes, dmarc_reports, remediation, baseline, inputs, exports, report, cli
     waf/               WAFGuard: constants, models, api, probe, checks, scoring, remediation, analysis, exports, report, cli
+    proofpoint/        PPGuard (Proofpoint): constants, models, routing (DNS), api (TAP), checks, analysis, exports, report, cli
     edr/               EDRGuard (SentinelOne): constants, models, api, checks, analysis, exports, report, cli
     zero_trust.py      ZTAGuard (Microsoft)
 tests/                 test automatici (pytest) con fixture sintetiche e DNS simulato (tests/fakedns.py)
@@ -367,8 +405,8 @@ contenuto del file indicato.
 
 ## Note di sicurezza
 
-- Tutti i moduli sono **in sola lettura**: WAFGuard usa solo endpoint list/status/get, EDRGuard solo GET (token Viewer).
-- Le credenziali (Imperva, SentinelOne) non sono accettate nel file di configurazione: variabili d'ambiente o file di chiave.
+- Tutti i moduli sono **in sola lettura**: WAFGuard usa solo endpoint list/status/get, EDRGuard solo GET (token Viewer), PPGuard solo le API SIEM e People di TAP.
+- Le credenziali (Imperva, SentinelOne, Proofpoint) non sono accettate nel file di configurazione: variabili d'ambiente o file di chiave.
 - I CSV sono protetti da formula injection; i dati inseriti nei report HTML sono escapati e le pagine hanno una CSP restrittiva.
 - Il fetch MTA-STS è protetto da SSRF (solo IP pubblici, salvo `--allow-private`).
 - `reports/`, snapshot e `securityhub.yaml` sono in `.gitignore`: descrivono la tua posture e non vanno pubblicati.

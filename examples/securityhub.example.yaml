@@ -7,7 +7,7 @@ keep_runs: 12                            # older run folders are deleted (0 = ke
 # fail_under: 70                         # exit code 2 if an area / asset scores below this
 # auto_baseline: true                    # compare every module with its previous run
 # max_parallel: 3                        # modules run at the same time (1 = one after the other)
-# max_age_days: {email: 2, dns: 2, waf: 2, edr: 2, zta: 35}  # data older than this is flagged as stale in portal and summary
+# max_age_days: {email: 2, dns: 2, proofpoint: 2, waf: 2, edr: 2, zta: 35}  # data older than this is flagged as stale in portal and summary
 # publish: /var/www/html/securityhub     # after each run copy the portal there as index.html (web server)
 #   or: publish: {dir: /var/www/html/securityhub, posture: true, mode: "0640"}
 # module_timeout: 3600                   # stop a module after this many seconds (per module: timeout)
@@ -34,6 +34,19 @@ modules:
       # nameservers: [1.1.1.1, 8.8.8.8]  # shared with email: set the same value in both, or the scans are separate
       # qps: 50                          # max DNS queries per second (default: unlimited)
       # max_inflight: 32                 # max DNS queries on the wire at once (default 32: router friendly)
+
+  # Proofpoint email protection: mail routing from public DNS + TAP (SIEM and People APIs, read-only)
+  # Credentials: export PROOFPOINT_PRINCIPAL=... PROOFPOINT_SECRET=...  (TAP service principal; never in this file)
+  # Without credentials only the DNS routing checks run.
+  proofpoint:
+    enabled: false
+    options:
+      domains: domains.csv               # same list as the email module
+      csv: true
+      # hours: 24                        # TAP window (1-168); keep it equal to the run interval
+      # secret_file: /etc/securityhub/proofpoint.secret  # instead of PROOFPOINT_SECRET
+      # gateway_hosts: [pps.contoso.com] # extra MX hosts that are Proofpoint (e.g. on-premises PPS)
+      # dns_qps: 20                      # max DNS queries per second
 
   # Imperva Cloud WAF configuration (read-only API calls)
   # Credentials: export IMPERVA_API_ID=... IMPERVA_API_KEY=...  (never in this file)

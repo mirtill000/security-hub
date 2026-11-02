@@ -49,7 +49,7 @@ class ExampleConfigTest(TempDirTest):
         with open(p, "w", encoding="utf-8") as f:
             f.write(orch.EXAMPLE_CONFIG)
         cfg = orch.load_config(p)
-        self.assertEqual(set(cfg["modules"]), {"email", "dns", "waf", "edr", "zta"})
+        self.assertEqual(set(cfg["modules"]), {"email", "dns", "proofpoint", "waf", "edr", "zta"})
 
     def test_unknown_module_rejected(self):
         p = self.path("c.json")

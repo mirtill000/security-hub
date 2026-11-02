@@ -39,6 +39,7 @@ from .console import Progress, Style, fmt_secs, print_posture
 MODULES: Dict[str, Tuple[str, Optional[str], str]] = {
     "email": ("securityhub.scanners.dns_email", "input_file", "E-mail security (MailGuard)"),
     "dns": ("securityhub.scanners.dns_email", "input_file", "DNS security (MailGuard)"),
+    "proofpoint": ("securityhub.scanners.proofpoint", None, "Proofpoint email protection (PPGuard)"),
     "waf": ("securityhub.scanners.waf", None, "Imperva Cloud WAF (WAFGuard)"),
     "edr": ("securityhub.scanners.edr", None, "SentinelOne EDR (EDRGuard)"),
     "zta": ("securityhub.scanners.zero_trust", "input", "Microsoft Zero Trust (ZTAGuard)"),
@@ -52,9 +53,11 @@ RUN_FORMAT = "%Y-%m-%dT%H%M%SZ"
 RESERVED = {"output", "version", "help"}
 # Secrets never belong in a configuration file: use the environment or a key file.
 FORBIDDEN = {"api_key": "use the IMPERVA_API_KEY environment variable or api_key_file",
-             "api_token": "use the S1_API_TOKEN environment variable or api_token_file"}
+             "api_token": "use the S1_API_TOKEN environment variable or api_token_file",
+             "secret": "use the PROOFPOINT_SECRET environment variable or secret_file"}
 # Option values that are paths: resolved relative to the configuration file.
 PATH_OPTIONS = {"input", "input_file", "metadata", "from_json", "save_raw", "api_key_file", "api_token_file", "inventory",
+                "domains", "secret_file",
                 "selectors_file",
                 "psl_file", "dmarc_reports", "baseline", "config"}
 
@@ -68,7 +71,7 @@ keep_runs: 12                            # older run folders are deleted (0 = ke
 # fail_under: 70                         # exit code 2 if an area / asset scores below this
 # auto_baseline: true                    # compare every module with its previous run
 # max_parallel: 3                        # modules run at the same time (1 = one after the other)
-# max_age_days: {email: 2, dns: 2, waf: 2, edr: 2, zta: 35}  # data older than this is flagged as stale in portal and summary
+# max_age_days: {email: 2, dns: 2, proofpoint: 2, waf: 2, edr: 2, zta: 35}  # data older than this is flagged as stale in portal and summary
 # publish: /var/www/html/securityhub     # after each run copy the portal there as index.html (web server)
 #   or: publish: {dir: /var/www/html/securityhub, posture: true, mode: "0640"}
 # module_timeout: 3600                   # stop a module after this many seconds (per module: timeout)
@@ -95,6 +98,19 @@ modules:
       # nameservers: [1.1.1.1, 8.8.8.8]  # shared with email: set the same value in both, or the scans are separate
       # qps: 50                          # max DNS queries per second (default: unlimited)
       # max_inflight: 32                 # max DNS queries on the wire at once (default 32: router friendly)
+
+  # Proofpoint email protection: mail routing from public DNS + TAP (SIEM and People APIs, read-only)
+  # Credentials: export PROOFPOINT_PRINCIPAL=... PROOFPOINT_SECRET=...  (TAP service principal; never in this file)
+  # Without credentials only the DNS routing checks run.
+  proofpoint:
+    enabled: false
+    options:
+      domains: domains.csv               # same list as the email module
+      csv: true
+      # hours: 24                        # TAP window (1-168); keep it equal to the run interval
+      # secret_file: /etc/securityhub/proofpoint.secret  # instead of PROOFPOINT_SECRET
+      # gateway_hosts: [pps.contoso.com] # extra MX hosts that are Proofpoint (e.g. on-premises PPS)
+      # dns_qps: 20                      # max DNS queries per second
 
   # Imperva Cloud WAF configuration (read-only API calls)
   # Credentials: export IMPERVA_API_ID=... IMPERVA_API_KEY=...  (never in this file)
@@ -170,7 +186,7 @@ def load_config(path: str) -> dict:
         raise ConfigError("the configuration must be a mapping")
     mods = cfg.get("modules") or {}
     if not isinstance(mods, dict):
-        raise ConfigError("'modules' must be a mapping of email / dns / waf / edr / zta")
+        raise ConfigError("'modules' must be a mapping of email / dns / proofpoint / waf / edr / zta")
     unknown = set(mods) - set(MODULES)
     if unknown:
         raise ConfigError(f"unknown module(s): {', '.join(sorted(unknown))} (available: {', '.join(ORDER)})")
@@ -465,8 +481,8 @@ def run(config_path: str, only: Optional[List[str]] = None, dry_run: bool = Fals
         raise ConfigError("max_parallel must be 1 or more")
     default_timeout = timeout if timeout is not None else cfg.get("module_timeout")
     max_age = cfg.get("max_age_days") or {}
-    if not isinstance(max_age, dict) or set(max_age) - {"email", "dns", "waf", "edr", "zta"}:
-        raise ConfigError("max_age_days must map email / dns / waf / edr / zta to a number of days")
+    if not isinstance(max_age, dict) or set(max_age) - set(MODULES):
+        raise ConfigError(f"max_age_days must map {' / '.join(MODULES)} to a number of days")
     try:
         max_age = {k: float(v) for k, v in max_age.items()}
     except (TypeError, ValueError):

@@ -323,6 +323,11 @@ th.c, td.c { text-align: center; } th.r, td.r { text-align: right; }
 .dr-sec > h3 .act { margin-left: auto; }
 .dr-sec table th, .dr-sec table td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; font-size: 13px; }
 .dr-sec table thead th { color: var(--muted); font-size: 12px; font-weight: 600; }
+.card > .body > table th, .card > .body > table td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; font-size: 13px; }
+.card > .body > table thead th { color: var(--muted); font-size: 12px; font-weight: 600; }
+.card > .body:has(> table) { overflow-x: auto; }
+.card > .body > table td.mono { word-break: break-all; }
+.dr-sec table th.r, .dr-sec table td.r, .card > .body > table th.r, .card > .body > table td.r { text-align: right; }
 .dr-sec table tbody tr:last-child td { border-bottom: 0; }
 .dr-print-title { display: none; }
 .ctl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 8px; }

@@ -1,0 +1,338 @@
+{
+ "tool": "PPGuard 1.0.0",
+ "vendor": "Proofpoint",
+ "api": "https://tap-api-v2.proofpoint.com",
+ "collected": "2026-11-01T06:00:00+00:00",
+ "window": {
+  "start": "2026-10-31T06:00:00+00:00",
+  "end": "2026-11-01T06:00:00+00:00",
+  "hours": 24
+ },
+ "domains": [
+  "contoso.com",
+  "fabrikam.com",
+  "northwind.com",
+  "tailspin.com",
+  "parked.com"
+ ],
+ "domain_meta": {
+  "contoso.com": {
+   "tier": "critical",
+   "owner": "it-mail",
+   "bu": "Group",
+   "tags": [
+    "corporate"
+   ]
+  },
+  "fabrikam.com": {
+   "tier": "high",
+   "owner": "",
+   "bu": "Retail",
+   "tags": []
+  }
+ },
+ "gateways": [
+  "pphosted.com",
+  "ppe-hosted.com",
+  "proofpoint.com",
+  "ppops.net"
+ ],
+ "dns": {
+  "contoso.com": {
+   "mx_status": "ok",
+   "mx": [
+    {
+     "preference": 10,
+     "host": "mx0a-00112233.pphosted.com",
+     "proofpoint": true,
+     "how": "name"
+    },
+    {
+     "preference": 10,
+     "host": "mx0b-00112233.pphosted.com",
+     "proofpoint": true,
+     "how": "name"
+    }
+   ],
+   "spf": "v=spf1 include:spf-00112233.pphosted.com include:spf.protection.outlook.com -all",
+   "spf_proofpoint": true,
+   "m365_verified": true,
+   "m365": {
+    "host": "contoso-com.mail.protection.outlook.com",
+    "resolves": true
+   }
+  },
+  "fabrikam.com": {
+   "mx_status": "ok",
+   "mx": [
+    {
+     "preference": 10,
+     "host": "mx0a-00112233.pphosted.com",
+     "proofpoint": true,
+     "how": "name"
+    },
+    {
+     "preference": 20,
+     "host": "mail.fabrikam.com",
+     "proofpoint": false,
+     "platform": "",
+     "resolves": true
+    }
+   ],
+   "spf": "v=spf1 ip4:203.0.113.10 -all",
+   "spf_proofpoint": false,
+   "m365_verified": false,
+   "m365": {
+    "host": "fabrikam-com.mail.protection.outlook.com",
+    "resolves": false
+   }
+  },
+  "northwind.com": {
+   "mx_status": "ok",
+   "mx": [
+    {
+     "preference": 0,
+     "host": "northwind-com.mail.protection.outlook.com",
+     "proofpoint": false,
+     "platform": "Microsoft 365",
+     "resolves": true
+    }
+   ],
+   "spf": "v=spf1 include:spf.protection.outlook.com -all",
+   "spf_proofpoint": false,
+   "m365_verified": true,
+   "m365": {
+    "host": "northwind-com.mail.protection.outlook.com",
+    "resolves": true
+   }
+  },
+  "tailspin.com": {
+   "mx_status": "ok",
+   "mx": [
+    {
+     "preference": 10,
+     "host": "mail.tailspin.com",
+     "proofpoint": true,
+     "how": "reverse DNS of 67.231.152.10: mx0a-00445566.pphosted.com"
+    }
+   ],
+   "spf": "v=spf1 include:spf-00445566.pphosted.com -all",
+   "spf_proofpoint": true,
+   "m365_verified": false,
+   "m365": {
+    "host": "tailspin-com.mail.protection.outlook.com",
+    "resolves": false
+   }
+  },
+  "parked.com": {
+   "mx_status": "null",
+   "mx": [],
+   "spf": "v=spf1 -all",
+   "spf_proofpoint": null,
+   "m365": null
+  }
+ },
+ "messages_delivered": [
+  {
+   "guid": "g1",
+   "time": "2026-10-31T09:12:00Z",
+   "recipients": [
+    "alice@contoso.com",
+    "carol@contoso.com"
+   ],
+   "from_domain": "invoice-portal.example",
+   "threats": [
+    {
+     "type": "url",
+     "classification": "phish",
+     "status": "active",
+     "id": "t1",
+     "url": "https://threatinsight.proofpoint.com/0000/threat/email/t1",
+     "campaign": "c-01",
+     "time": "2026-10-31T10:00:00Z"
+    }
+   ],
+   "policy_routes": [
+    "default_inbound"
+   ],
+   "quarantine": null,
+   "rewritten": false,
+   "phish_score": 95,
+   "impostor_score": 0
+  },
+  {
+   "guid": "g2",
+   "time": "2026-10-31T11:40:00Z",
+   "recipients": [
+    "sales@fabrikam.com"
+   ],
+   "from_domain": "partner-supplies.example",
+   "threats": [
+    {
+     "type": "attachment",
+     "classification": "malware",
+     "status": "active",
+     "id": "t2",
+     "url": "https://threatinsight.proofpoint.com/0000/threat/email/t2",
+     "campaign": null,
+     "time": "2026-10-31T12:30:00Z"
+    }
+   ],
+   "policy_routes": [
+    "default_inbound",
+    "firewallsafelist"
+   ],
+   "quarantine": null,
+   "rewritten": true,
+   "phish_score": 0,
+   "impostor_score": 0
+  },
+  {
+   "guid": "g3",
+   "time": "2026-10-31T15:05:00Z",
+   "recipients": [
+    "ceo@adatum.com"
+   ],
+   "from_domain": "adatum-co.example",
+   "threats": [
+    {
+     "type": "messageText",
+     "classification": "impostor",
+     "status": "active",
+     "id": "t3",
+     "url": "https://threatinsight.proofpoint.com/0000/threat/email/t3",
+     "campaign": null,
+     "time": "2026-10-31T15:06:00Z"
+    }
+   ],
+   "policy_routes": [
+    "default_inbound"
+   ],
+   "quarantine": null,
+   "rewritten": true,
+   "phish_score": 0,
+   "impostor_score": 100
+  },
+  {
+   "guid": "g4",
+   "time": "2026-10-31T16:00:00Z",
+   "recipients": [
+    "dave@contoso.com"
+   ],
+   "from_domain": "newsletter.example",
+   "threats": [
+    {
+     "type": "url",
+     "classification": "phish",
+     "status": "falsepositive",
+     "id": "t4",
+     "url": "https://threatinsight.proofpoint.com/0000/threat/email/t4",
+     "campaign": null,
+     "time": "2026-10-31T16:30:00Z"
+    }
+   ],
+   "policy_routes": [
+    "default_inbound"
+   ],
+   "quarantine": null,
+   "rewritten": true,
+   "phish_score": 10,
+   "impostor_score": 0
+  }
+ ],
+ "clicks_permitted": [
+  {
+   "recipient": "alice@contoso.com",
+   "classification": "phish",
+   "status": "active",
+   "time": "2026-10-31T09:30:00Z",
+   "threat_time": "2026-10-31T10:00:00Z",
+   "threat_id": "t1",
+   "url": "https://threatinsight.proofpoint.com/0000/threat/email/t1",
+   "campaign": "c-01",
+   "guid": "g1"
+  }
+ ],
+ "blocked": {
+  "contoso.com": {
+   "messages": 1240,
+   "clicks": 3
+  },
+  "fabrikam.com": {
+   "messages": 310
+  },
+  "tailspin.com": {
+   "messages": 95
+  }
+ },
+ "siem_failed": false,
+ "vap": [
+  {
+   "emails": [
+    "alice@contoso.com"
+   ],
+   "name": "Alice Rossi",
+   "department": "Finance",
+   "title": "CFO",
+   "vip": true,
+   "attack_index": 1520,
+   "clicks": null,
+   "families": [
+    "Credential Phishing",
+    "Emotet"
+   ]
+  },
+  {
+   "emails": [
+    "sales@fabrikam.com"
+   ],
+   "name": "Sales",
+   "department": "Sales",
+   "title": "",
+   "vip": false,
+   "attack_index": 830,
+   "clicks": null,
+   "families": [
+    "Malware"
+   ]
+  }
+ ],
+ "vap_threshold": 700,
+ "people_window_days": 30,
+ "top_clickers": [
+  {
+   "emails": [
+    "alice@contoso.com"
+   ],
+   "name": "Alice Rossi",
+   "department": "Finance",
+   "title": "CFO",
+   "vip": true,
+   "attack_index": null,
+   "clicks": 3,
+   "families": [
+    "Credential Phishing"
+   ]
+  },
+  {
+   "emails": [
+    "bob@contoso.com"
+   ],
+   "name": "Bob Verdi",
+   "department": "IT",
+   "title": "",
+   "vip": false,
+   "attack_index": null,
+   "clicks": 1,
+   "families": [
+    "Malware"
+   ]
+  }
+ ],
+ "errors": [],
+ "api_stats": {
+  "requests": 26,
+  "retries": 0,
+  "errors": 0
+ }
+}

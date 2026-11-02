@@ -37,14 +37,14 @@ __version__ = "1.2.0"
 
 DATA_RE = re.compile(r'<script type="application/json" id="mg-data">(.*?)</script>', re.S)
 TITLE_RE = re.compile(r"<title>(.*?)</title>", re.S | re.I)
-TYPE_ORDER = {"email": 0, "dns": 1, "waf": 2, "edr": 3, "zta": 4, "other": 5}
-TYPE_LABEL = {"email": "Email security", "dns": "DNS security", "waf": "Imperva Cloud WAF", "edr": "SentinelOne EDR",
+TYPE_ORDER = {"email": 0, "dns": 1, "proofpoint": 2, "waf": 3, "edr": 4, "zta": 5, "other": 6}
+TYPE_LABEL = {"email": "Email security", "dns": "DNS security", "waf": "Imperva Cloud WAF", "edr": "SentinelOne EDR", "proofpoint": "Proofpoint",
               "zta": "Microsoft Zero Trust", "other": "Report"}
 DOMAIN_AREAS = ("email", "dns")  # reports whose rows are domains (MailGuard: one scan, two reports)
 TIER_W = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 # Data older than this (days) is flagged as stale: DNS and WAF can be assessed daily, the Zero Trust
 # Assessment is a periodic export. Override with --max-age / max_age_days in the configuration.
-MAX_AGE_DAYS = {"email": 2, "dns": 2, "waf": 2, "edr": 2, "zta": 35}
+MAX_AGE_DAYS = {"email": 2, "dns": 2, "proofpoint": 2, "waf": 2, "edr": 2, "zta": 35}
 STATUS_RANK = {"bad": 0, "warn": 1, "good": 2}
 
 
@@ -61,13 +61,15 @@ def detect(payload: Optional[dict], title: str) -> str:
             return "zta"
         if (payload.get("meta") or {}).get("tool") == "EDRGuard":
             return "edr"
+        if (payload.get("meta") or {}).get("tool") == "PPGuard":
+            return "proofpoint"
         if (payload.get("meta") or {}).get("tool") == "WAFGuard" or "account_issues" in payload:
             return "waf"
         if isinstance(payload.get("results"), list) and "checks" in payload:
             # MailGuard 4 writes an e-mail and a DNS report; older combined reports read as e-mail (their KPIs were)
             return "dns" if (payload.get("meta") or {}).get("view") == "dns" else "email"
     t = title.lower()
-    return ("zta" if "zero trust" in t else "edr" if "edr" in t else "waf" if "waf" in t else "dns" if "dns security" in t
+    return ("zta" if "zero trust" in t else "proofpoint" if "proofpoint" in t else "edr" if "edr" in t else "waf" if "waf" in t else "dns" if "dns security" in t
             else "email" if "email" in t else "other")
 
 
@@ -83,7 +85,7 @@ def summarize_assets(kind: str, payload: dict) -> dict:
     measured = [r for r in rows if (inventory.dns_measured(r) if kind in DOMAIN_AREAS else inventory.waf_measured(r))]
     avg = weighted_avg(measured, tiers)
     sev = Counter(i.get("severity") for r in rows for i in r.get("issues") or [])
-    noun = "domains" if kind in DOMAIN_AREAS else "endpoints" if kind == "edr" else "websites"
+    noun = "domains" if kind in DOMAIN_AREAS + ("proofpoint",) else "endpoints" if kind == "edr" else "websites"
     kpis = [[len(rows), f"{noun} assessed"], *([[len(rows) - len(measured), "not verified (errors)", "warn"]] if len(measured) < len(rows) else []),
             [sum(r.get("overall_score", 0) >= 80 for r in rows), "well protected (80+)", "pass"],
             [sum(r.get("overall_score", 0) < 50 for r in measured), "at critical risk (under 50)", "fail"],
@@ -451,6 +453,65 @@ def exec_edr(payload: dict) -> dict:
             "trend": round(sum(deltas) / len(deltas), 1) if deltas else None, "actions": actions, "headline": head}
 
 
+
+def exec_proofpoint(payload: dict) -> dict:
+    """Email protection outcomes: mail really filtered by Proofpoint, threats that reached users, clicks allowed.
+    A domain whose routing could not be read is 'not verified'; TAP figures only when TAP was read."""
+    rows = payload.get("results") or []
+    st = lambda r, c: ((r.get("checks") or {}).get(c) or {}).get("status")
+    codes = lambda r: {i.get("code") for i in r.get("issues") or []}
+    routed = [r for r in rows if st(r, "routing") in ("valid", "error", "warning")]
+    only_pp = [r for r in routed if st(r, "routing") == "valid"]
+    bypass = [r for r in routed if st(r, "routing") != "valid"]
+    direct = [r for r in rows if "DIRECT_DELIVERY" in codes(r)]
+    clicked = [r for r in rows if "CLICK_PERMITTED" in codes(r)]
+    tap = bool(payload.get("tap"))
+    tot = payload.get("totals") or {}
+    hours = (payload.get("window") or {}).get("hours")
+    users = sorted({u for r in clicked for u in (((r.get("checks") or {}).get("clicks") or {}).get("data") or {}).get("users") or []})
+    kpis = []
+    if routed:
+        kpis.append(_kpi("pp_routing", "Mail domains filtered only by Proofpoint", _pct(len(only_pp), len(routed)), "%",
+                         f"{len(only_pp)} of {len(routed)} domains with every MX through Proofpoint", 100, area="proofpoint",
+                         hash_="#/domains?f=routing:error"))
+    if tap:
+        kpis.append(_kpi("pp_clicks", f"Users who clicked a malicious URL that was allowed ({hours}h)", len(users), "",
+                         f"{tot.get('clicks_permitted', 0)} permitted clicks", 0, higher_is_better=False, area="proofpoint",
+                         hash_="#/domains?finding=CLICK_PERMITTED"))
+        kpis.append(_kpi("pp_delivered", f"Malicious messages delivered ({hours}h)", tot.get("malicious", 0), "",
+                         f"{tot.get('blocked_messages', 0)} blocked in the same window", 0, higher_is_better=False,
+                         area="proofpoint", hash_="#/policies"))
+    vap = (payload.get("people") or {}).get("vap") or []
+    side = [["Domains bypassing Proofpoint", str(len(bypass)), "bad" if bypass else "good"],
+            ["Direct delivery to Microsoft 365 to verify", str(len(direct)), "warn" if direct else "good"]]
+    if tap:
+        side += [["Users with a malicious click allowed", str(len(users)), "bad" if users else "good"],
+                 ["Very Attacked People", str(len(vap)), "warn" if any(p.get("vip") for p in vap) else "good"]]
+    measured = [r for r in rows if r.get("score_breakdown", {}).get("max")]
+    score = weighted_avg(measured, payload.get("tiers") or TIER_W)
+    deltas = [r["change"]["score_delta"] for r in rows if r.get("change") and r["change"].get("score_delta") is not None]
+    head = None
+    if users:
+        # possible account compromise: ranked first among the headlines of the portal
+        head = (100, f"{len(users)} user{'s' if len(users) != 1 else ''} clicked a malicious URL that Proofpoint allowed")
+    elif bypass:
+        head = (_pct(len(bypass), len(routed)), f"{len(bypass)} of {len(routed)} mail domains can receive mail that skips Proofpoint")
+    elif tot.get("malicious"):
+        head = (None, f"{tot['malicious']} malicious message{'s' if tot['malicious'] != 1 else ''} reached users in {hours}h")
+    actions = _asset_actions("proofpoint", payload, rows)
+    for i in payload.get("account_issues") or []:
+        if i.get("severity") in ("critical", "warning"):
+            actions.append({"area": "proofpoint", "code": i.get("code"), "severity": i["severity"], "title": i.get("message"),
+                            "rec": i.get("recommendation"), "count": None, "share": None, "critical_tier": 0,
+                            "impact": 40 if i["severity"] == "critical" else 10, "hash": "#/policies"})
+    # a click on a malicious URL that was allowed is a possible compromise: it leads the action plan
+    actions.sort(key=lambda a: (a["code"] != "CLICK_PERMITTED", -a["impact"], a["severity"] != "critical", str(a["code"])))
+    status = _status(score, bool(bypass or users or tot.get("malicious")))
+    if users and status != "unknown":
+        status = "bad"
+    return {"status": status, "kpis": kpis, "side": side,
+            "trend": round(sum(deltas) / len(deltas), 1) if deltas else None, "actions": actions, "headline": head}
+
 def exec_zta(payload: dict) -> dict:
     tests = payload.get("tests") or []
     info = payload.get("tenant_info")
@@ -530,6 +591,8 @@ def page_parts(kind: str) -> Tuple[str, str, str]:
         from .scanners.waf import report as m
     elif kind == "edr":
         from .scanners.edr import report as m
+    elif kind == "proofpoint":
+        from .scanners.proofpoint import report as m
     elif kind == "zta":
         from .scanners import zero_trust as m
     else:
@@ -595,13 +658,14 @@ def load_report(path: str, idx: int, keep: bool = True) -> dict:
     if payload is not None:
         try:
             summary = (summarize_zta(payload) if kind == "zta" else
-                       summarize_assets(kind, payload) if kind in ("email", "dns", "waf", "edr") else summary)
+                       summarize_assets(kind, payload) if kind in ("email", "dns", "waf", "edr", "proofpoint") else summary)
         except Exception as e:  # never fail the hub because of one report
             print(f"Warning: summary of {os.path.basename(path)} not available ({type(e).__name__}: {e})", file=sys.stderr)
     summary["exec"] = None
-    if payload is not None and kind in ("email", "dns", "waf", "edr", "zta"):
+    if payload is not None and kind in ("email", "dns", "waf", "edr", "proofpoint", "zta"):
         try:
-            summary["exec"] = {"email": exec_email, "dns": exec_dns, "waf": exec_waf, "edr": exec_edr, "zta": exec_zta}[kind](payload)
+            summary["exec"] = {"email": exec_email, "dns": exec_dns, "waf": exec_waf, "edr": exec_edr, "proofpoint": exec_proofpoint,
+                               "zta": exec_zta}[kind](payload)
         except Exception as e:
             print(f"Warning: executive metrics of {os.path.basename(path)} not available ({type(e).__name__}: {e})", file=sys.stderr)
     if not summary.get("generated"):
