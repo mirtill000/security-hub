@@ -81,6 +81,7 @@ class DKIMResult:
     weak_keys: int = 0
     probed: int = 0
     stopped_early: bool = False  # a valid key was found in the first round (or the domain sends no mail)
+    full_search: Optional[str] = None  # when the full selector search was last run, if this run reused it
     dangling: List[dict] = field(default_factory=list)  # {"name", "target"}
     issues: List[Issue] = field(default_factory=list)
 

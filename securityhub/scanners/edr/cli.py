@@ -71,6 +71,7 @@ Exit codes: 0 ok, 1 usage/API error, 2 an endpoint scored below --fail-under, 13
     p.add_argument("--baseline", help="Previous JSON export to compare with")
     p.add_argument("--qps", type=float, default=5.0, help="Max API requests per second (default: 5)")
     p.add_argument("--timeout", type=float, default=30.0, help="API timeout in seconds (default: 30)")
+    p.add_argument("--no-cache", action="store_true", help="Always read the GA agent versions (cached for 24 hours)")
     p.add_argument("--insecure", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--fail-under", type=int, help="Exit with code 2 if any endpoint scores below this value")
     p.add_argument("-q", "--quiet", action="store_true", help="Only print the summary")
@@ -111,7 +112,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         try:
             api = SentinelOneAPI(args.console, token, args.timeout, args.qps, verify=not args.insecure)
             log(f"Reading SentinelOne console {api.base} (read-only)")
-            snap = collect(api, [s.strip() for s in args.sites.split(",") if s.strip()], log)
+            from ...cache import Store
+            store = Store("sentinelone", enabled=not args.no_cache)
+            snap = collect(api, [s.strip() for s in args.sites.split(",") if s.strip()], log, store=store)
+            store.save()
         except (APIError, ValueError) as e:
             print(f"Error: {e}", file=sys.stderr)
             return EXIT_USAGE

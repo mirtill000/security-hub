@@ -45,7 +45,11 @@ MODULES: Dict[str, Tuple[str, Optional[str], str]] = {
     "zta": ("securityhub.scanners.zero_trust", "input", "Microsoft Zero Trust (ZTAGuard)"),
 }
 ORDER = list(MODULES)
-MAILGUARD = ("email", "dns")  # same scanner: one scan can produce both reports
+MAILGUARD = ("email", "dns")
+# Modules that generate a lot of network traffic (DNS queries, Internet probes): at most max_parallel_network
+# of them run at the same time (default 1), so their peaks never add up. The others (API reads of a few
+# hundred requests) keep running in parallel with them.
+NETWORK_HEAVY = {"email", "dns", "proofpoint", "waf"}  # same scanner: one scan can produce both reports
 RUNS_DIR = "runs"
 RUN_FORMAT = "%Y-%m-%dT%H%M%SZ"
 
@@ -71,6 +75,7 @@ keep_runs: 12                            # older run folders are deleted (0 = ke
 # fail_under: 70                         # exit code 2 if an area / asset scores below this
 # auto_baseline: true                    # compare every module with its previous run
 # max_parallel: 3                        # modules run at the same time (1 = one after the other)
+# max_parallel_network: 1                # of which DNS / Internet-probing ones (email+dns, proofpoint, waf): default 1
 # max_age_days: {email: 2, dns: 2, proofpoint: 2, waf: 2, edr: 2, zta: 35}  # data older than this is flagged as stale in portal and summary
 # publish: /var/www/html/securityhub     # after each run copy the portal there as index.html (web server)
 #   or: publish: {dir: /var/www/html/securityhub, posture: true, mode: "0640"}
@@ -98,6 +103,7 @@ modules:
       # nameservers: [1.1.1.1, 8.8.8.8]  # shared with email: set the same value in both, or the scans are separate
       # qps: 50                          # max DNS queries per second (default: unlimited)
       # max_inflight: 32                 # max DNS queries on the wire at once (default 32: router friendly)
+      # cache_max_age: 24                # hours: full DKIM search, RDAP, lookalikes... redone once a day (0 = every run)
 
   # Proofpoint email protection: mail routing from public DNS + TAP (SIEM and People APIs, read-only)
   # Credentials: export PROOFPOINT_PRINCIPAL=... PROOFPOINT_SECRET=...  (TAP service principal; never in this file)
@@ -483,6 +489,13 @@ def run(config_path: str, only: Optional[List[str]] = None, dry_run: bool = Fals
         raise ConfigError("max_parallel must be a number")
     if parallel < 1:
         raise ConfigError("max_parallel must be 1 or more")
+    try:
+        net_parallel = int(cfg.get("max_parallel_network", 1))
+    except (TypeError, ValueError):
+        raise ConfigError("max_parallel_network must be a number")
+    if net_parallel < 1:
+        raise ConfigError("max_parallel_network must be 1 or more")
+
     default_timeout = timeout if timeout is not None else cfg.get("module_timeout")
     max_age = cfg.get("max_age_days") or {}
     if not isinstance(max_age, dict) or set(max_age) - set(MODULES):
@@ -536,7 +549,7 @@ def run(config_path: str, only: Optional[List[str]] = None, dry_run: bool = Fals
         return EXIT_USAGE
     try:
         return _execute(cfg, plans, out_dir, stamp, when, run_dir, parallel, max_age, fail_under, quiet, verbose, say, err,
-                        publish, labels)
+                        publish, labels, net_parallel)
     finally:
         lock.__exit__(None, None, None)
 
@@ -554,7 +567,8 @@ def _claim_run_dir(out_dir: str, stamp: str, when: datetime) -> Tuple[str, str]:
 
 
 def _execute(cfg, plans, out_dir, stamp, when, run_dir, parallel, max_age, fail_under, quiet, verbose, say, err,
-             publish=None, labels=None) -> int:
+             publish=None, labels=None, net_parallel: int = 1) -> int:
+    net_slots = threading.BoundedSemaphore(net_parallel)
     os.makedirs(os.path.join(out_dir, RUNS_DIR), exist_ok=True)
     claimed, stamp = _claim_run_dir(out_dir, stamp, when)
     if claimed != run_dir:  # the planned folder was taken meanwhile: move the outputs of every module
@@ -576,8 +590,15 @@ def _execute(cfg, plans, out_dir, stamp, when, run_dir, parallel, max_age, fail_
     results: Dict[str, ModuleResult] = {}
 
     def job(name, out_html, argv, t):
-        progress.start(name)
-        r = run_module(name, argv, out_html, os.path.join(run_dir, f"{name}.log"), t, echo if verbose else None, procs)
+        heavy = name in NETWORK_HEAVY
+        if heavy:
+            net_slots.acquire()  # shown as queued until a network slot is free
+        try:
+            progress.start(name)
+            r = run_module(name, argv, out_html, os.path.join(run_dir, f"{name}.log"), t, echo if verbose else None, procs)
+        finally:
+            if heavy:
+                net_slots.release()
         status = ("timeout" if r.timed_out else "interrupted" if r.code == EXIT_INTERRUPTED else
                   "failed" if r.error or r.code not in (EXIT_OK, EXIT_FAIL_UNDER) else "below" if r.code == EXIT_FAIL_UNDER else "ok")
         progress.finish(name, status, r.error)

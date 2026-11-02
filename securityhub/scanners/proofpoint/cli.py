@@ -65,6 +65,11 @@ Exit codes: 0 ok, 1 usage/API error, 2 a domain scored below --fail-under, 130 i
     p.add_argument("--people-days", type=int, default=PEOPLE_WINDOW_DAYS, choices=(14, 30, 90),
                    help=f"Window of the People API (default: {PEOPLE_WINDOW_DAYS})")
     p.add_argument("--no-tap", action="store_true", help="Skip TAP: DNS routing checks only")
+    p.add_argument("--siem-reuse-hours", type=float, default=12.0,
+                   help="Reuse settled hours of SIEM data read in the last N hours (default: 12; 0 = always read)")
+    p.add_argument("--people-max-age", type=float, default=24.0,
+                   help="Reuse People API data (VAP, top clickers) younger than N hours (default: 24; 0 = always read)")
+    p.add_argument("--no-cache", action="store_true", help="Do not read or write the cache")
     p.add_argument("--no-dns", action="store_true", help="Skip the DNS routing checks: TAP only")
     p.add_argument("--gateway-hosts", default="", help="Extra MX host suffixes to treat as Proofpoint (e.g. on-premises PPS)")
     p.add_argument("--nameservers", default="1.1.1.1,8.8.8.8,9.9.9.9", help="DNS resolvers (default: 1.1.1.1,8.8.8.8,9.9.9.9)")
@@ -167,7 +172,18 @@ def main(argv: Optional[List[str]] = None) -> int:
             try:
                 api = TapAPI(args.principal, secret, args.timeout, args.qps, args.tap_url)
                 log(f"Reading Proofpoint TAP ({api.base}, read-only), last {args.hours} hours")
-                snap.update(collect(api, log, args.hours, args.people_days))
+                from ...cache import Store
+                store = Store("proofpoint", enabled=not args.no_cache)
+                snap.update(collect(api, log, args.hours, args.people_days, store=store,
+                                    siem_reuse_hours=args.siem_reuse_hours, people_max_age=args.people_max_age))
+                problem = store.save()
+                if problem:
+                    print(f"Warning: cache not saved ({problem})", file=sys.stderr)
+                if snap.get("siem_hours_reused") or snap.get("people_reused"):
+                    notes.append("Reused from earlier runs: " + ", ".join(
+                        ([f"{snap['siem_hours_reused']} settled hours of SIEM data (read again after "
+                          f"{args.siem_reuse_hours:g} hours)"] if snap.get("siem_hours_reused") else [])
+                        + ([f"People API data (refreshed every {args.people_max_age:g} hours)"] if snap.get("people_reused") else [])) + ".")
                 snap["domains"], snap["domain_meta"] = domains, dmeta
             except (APIError, ValueError) as e:
                 print(f"Error: {e}", file=sys.stderr)

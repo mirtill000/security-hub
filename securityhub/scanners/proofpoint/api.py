@@ -123,8 +123,12 @@ def _person(u: dict, stat_key: str) -> dict:
 
 
 def collect(api: TapAPI, log: Callable[[str], None], hours: int = WINDOW_HOURS, people_days: int = PEOPLE_WINDOW_DAYS,
-            now: Optional[datetime] = None) -> dict:
-    """Read-only TAP snapshot: delivered threats and permitted clicks (detail), blocked ones (counts), VAP, top clickers."""
+            now: Optional[datetime] = None, store=None, siem_reuse_hours: float = 12.0, people_max_age: float = 24.0) -> dict:
+    """Read-only TAP snapshot: delivered threats and permitted clicks (detail), blocked ones (counts), VAP, top clickers.
+
+    store (securityhub.cache.Store): an hour of SIEM data that had already settled when it was read (ended more
+    than an hour before) is reused for siem_reuse_hours, then read again so later verdicts (a threat cleared or
+    marked false positive) are picked up; the People API (14/30/90-day statistics) is read once per people_max_age."""
     end = (now or datetime.now(timezone.utc)).replace(minute=0, second=0, microsecond=0)
     start = end - timedelta(hours=hours)
     snap: Dict[str, Any] = {"tool": f"PPGuard {__version__}", "vendor": "Proofpoint", "api": api.base,
@@ -139,20 +143,33 @@ def collect(api: TapAPI, log: Callable[[str], None], hours: int = WINDOW_HOURS, 
         log(f"  ! {where}: {e}")
 
     t = start
-    failed = total = 0
+    failed = total = reused = 0
+    read_at = now or datetime.now(timezone.utc)
     while t < end:  # the SIEM API returns at most one hour per call
         t2 = min(end, t + timedelta(hours=1))
         total += 1
+        key = t.strftime('%Y-%m-%dT%H:%M:%SZ')
         try:
-            body = api.get("/v2/siem/all", format="json",
-                           interval=f"{t.strftime('%Y-%m-%dT%H:%M:%SZ')}/{t2.strftime('%Y-%m-%dT%H:%M:%SZ')}")
-            snap["messages_delivered"] += [_message(m) for m in body.get("messagesDelivered") or []]
-            snap["clicks_permitted"] += [_click(c) for c in body.get("clicksPermitted") or []]
-            for m in body.get("messagesBlocked") or []:
-                for r in _recipients(m):
-                    blocked[_domain(r)]["messages"] += 1
-            for c in body.get("clicksBlocked") or []:
-                blocked[_domain(_addr(c.get("recipient")))]["clicks"] += 1
+            bucket = store.get("siem", key, siem_reuse_hours) if store is not None else None
+            if isinstance(bucket, dict):
+                reused += 1
+            else:
+                body = api.get("/v2/siem/all", format="json", interval=f"{key}/{t2.strftime('%Y-%m-%dT%H:%M:%SZ')}")
+                hb: Dict[str, Counter] = defaultdict(Counter)
+                for m in body.get("messagesBlocked") or []:
+                    for r in _recipients(m):
+                        hb[_domain(r)]["messages"] += 1
+                for c in body.get("clicksBlocked") or []:
+                    hb[_domain(_addr(c.get("recipient")))]["clicks"] += 1
+                bucket = {"delivered": [_message(m) for m in body.get("messagesDelivered") or []],
+                          "clicks": [_click(c) for c in body.get("clicksPermitted") or []],
+                          "blocked": {d: dict(c) for d, c in hb.items() if d}}
+                if store is not None and t2 <= read_at - timedelta(hours=1):  # settled hours only
+                    store.put("siem", key, bucket)
+            snap["messages_delivered"] += bucket.get("delivered") or []
+            snap["clicks_permitted"] += bucket.get("clicks") or []
+            for d, c in (bucket.get("blocked") or {}).items():
+                blocked[d].update(c)
         except APIError as e:
             failed += 1
             if failed <= 3:
@@ -165,10 +182,17 @@ def collect(api: TapAPI, log: Callable[[str], None], hours: int = WINDOW_HOURS, 
     snap["blocked"] = {d: dict(c) for d, c in blocked.items() if d}
     snap["siem_failed"] = failed == total or any(e["error"].startswith("HTTP 401") or e["error"].startswith("HTTP 403")
                                                   for e in snap["errors"])
+    snap["siem_hours_reused"] = reused
     log(f"{len(snap['messages_delivered'])} delivered threat message(s), {len(snap['clicks_permitted'])} permitted click(s) "
-        f"in {hours}h")
+        f"in {hours}h" + (f" ({reused} of {total} hours reused from earlier runs)" if reused else ""))
     window = 14 if people_days <= 14 else 30 if people_days <= 30 else 90
     snap["people_window_days"] = window
+    people = store.get("people", "tap", people_max_age, str(window)) if store is not None else None
+    if isinstance(people, dict):
+        snap.update({"vap": people.get("vap"), "vap_threshold": people.get("vap_threshold"),
+                     "top_clickers": people.get("top_clickers"), "people_reused": True})
+        snap["api_stats"] = dict(api.stats)
+        return snap
     try:
         body = api.get("/v2/people/vap", window=window)
         snap["vap"] = [_person(u, "threatStatistics") for u in body.get("users") or []]
@@ -183,5 +207,8 @@ def collect(api: TapAPI, log: Callable[[str], None], hours: int = WINDOW_HOURS, 
     except APIError as e:
         snap["top_clickers"] = None
         err("People API (top clickers)", e)
+    if store is not None and snap["vap"] is not None and snap["top_clickers"] is not None:
+        store.put("people", "tap", {"vap": snap["vap"], "vap_threshold": snap.get("vap_threshold"),
+                                    "top_clickers": snap["top_clickers"]}, str(window))
     snap["api_stats"] = dict(api.stats)
     return snap

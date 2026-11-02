@@ -385,15 +385,39 @@ class AuthChecks:
 
         from_reports = self.report_selectors.get(domain, [])
         selectors = list(dict.fromkeys(from_reports + self.selectors))
+        # Selector search done recently (cache): only the selectors found then (or, when none was found, the
+        # common ones) are probed again; the full search is redone when it is older than the cache period,
+        # or at once if a known selector disappeared.
+        known = None
+        if self.cache is not None and not self.full_dkim:
+            known = self.cache.get("dkim", domain, self.discovery_max_age, str(len(self.selectors)))
+            known = known if isinstance(known, list) else None
+        if known == [] and not from_reports and not self.extra_selectors:
+            # nothing found by the recent full search: if _domainkey still does not exist (RFC 8020: NXDOMAIN
+            # means nothing below it), no selector can have appeared - one query instead of a probing round
+            base = self.dns.query(f"_domainkey.{domain}", "TXT")
+            if base.status == "nxdomain":
+                result.full_search = self.cache.stored_at("dkim", domain)
+                result.probed = 1
+                result.status = "missing" if mail_enabled else "na"
+                if mail_enabled:
+                    result.issues.append(make_issue("DKIM_NOT_FOUND", "_domainkey does not exist; full search of "
+                                                    f"{len(self.selectors)} selectors on {str(result.full_search)[:10]}"))
+                return result
         if self.full_dkim:
             first, rest = selectors, []
         else:
             hinted = [x for p in providers for k, v in DKIM_PROVIDER_SELECTORS.items() if k in p.lower() for x in v]
-            first = list(dict.fromkeys(from_reports + self.extra_selectors + hinted + DKIM_FIRST_ROUND))
+            common = hinted + DKIM_FIRST_ROUND
+            first = list(dict.fromkeys(from_reports + self.extra_selectors + (known if known else common)))
             first = [x for x in first if x in selectors]
             rest = [x for x in selectors if x not in first]
         run(first)
         found = any(x.status in ("valid", "weak") for x in result.selectors)
+        reuse = known is not None and (found or not known) and state["errors"] == 0
+        if reuse:  # same answer as the recent full search: skip it
+            result.full_search = self.cache.stored_at("dkim", domain)
+            rest = []
         # Parked domains (no mail) need no DKIM: the first round only looks for dangling selector CNAMEs.
         if rest and mail_enabled and not found:
             if state["errors"] < self.DKIM_MAX_ERRORS:
@@ -402,6 +426,8 @@ class AuthChecks:
                 state["skipped"] += len(rest)
         result.stopped_early = bool(rest) and (found or not mail_enabled)
         selectors = first + (rest if not result.stopped_early else [])
+        if self.cache is not None and not reuse and not self.full_dkim and state["errors"] == 0:
+            self.cache.put("dkim", domain, sorted({s.name for s in result.selectors}), str(len(self.selectors)))
         dns_errors = state["errors"]
         aborted = state["skipped"] > 0
         probed = len(selectors) - state["skipped"]
@@ -440,7 +466,9 @@ class AuthChecks:
                 result.status = "na"
             else:
                 result.status = "missing"
-                result.issues.append(make_issue("DKIM_NOT_FOUND", f"{len(selectors)} selectors probed"))
+                result.issues.append(make_issue("DKIM_NOT_FOUND", f"{len(selectors)} selectors probed" + (
+                    f"; full search of {len(self.selectors)} selectors on {str(result.full_search)[:10]}"
+                    if result.full_search else "")))
         elif weak:
             result.status = "partial"
         else:

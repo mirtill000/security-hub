@@ -98,8 +98,12 @@ class SentinelOneAPI:
                 return
 
 
-def collect(api: SentinelOneAPI, site_filter: List[str], log: Callable[[str], None], max_threats: int = 5000) -> dict:
-    """Read-only snapshot of the console: agents, sites, groups, policies, open threats, exclusions, GA packages."""
+def collect(api: SentinelOneAPI, site_filter: List[str], log: Callable[[str], None], max_threats: int = 5000,
+            store=None, packages_max_age: float = 24.0) -> dict:
+    """Read-only snapshot of the console: agents, sites, groups, policies, open threats, exclusions, GA packages.
+
+    store (securityhub.cache.Store): the list of GA agent packages (only used to tell the latest version) is
+    read once per packages_max_age hours; everything else is read on every run."""
     snap: Dict[str, Any] = {"tool": f"EDRGuard {__version__}", "vendor": "SentinelOne", "console": api.base,
                             "collected": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                             "agents": [], "sites": [], "groups": [], "policies": {}, "threats": [], "exclusions": [],
@@ -158,12 +162,18 @@ def collect(api: SentinelOneAPI, site_filter: List[str], log: Callable[[str], No
         except APIError as e:
             if e.status not in (400, 404):  # an exclusion type the console does not know is not an error
                 err(f"exclusions ({t})", e)
-    try:
-        snap["packages"] = [{k: p.get(k) for k in ("version", "osType", "status", "platformType", "fileExtension")}
-                            for p in api.paginate("/update/agent/packages", max_items=500, status="ga",
-                                                  sortBy="version", sortOrder="desc")]
-    except APIError as e:
-        err("agent packages", e)
+    cached = store.get("packages", api.base, packages_max_age) if store is not None else None
+    if isinstance(cached, list):
+        snap["packages"], snap["packages_reused"] = cached, True
+    else:
+        try:
+            snap["packages"] = [{k: p.get(k) for k in ("version", "osType", "status", "platformType", "fileExtension")}
+                                for p in api.paginate("/update/agent/packages", max_items=500, status="ga",
+                                                      sortBy="version", sortOrder="desc")]
+            if store is not None and snap["packages"]:
+                store.put("packages", api.base, snap["packages"])
+        except APIError as e:
+            err("agent packages", e)
     snap["api_stats"] = dict(api.stats)
     return snap
 

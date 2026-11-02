@@ -5,7 +5,7 @@ import json
 import os
 import re
 import urllib.error
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 from securityhub import cli, orchestrator as orch, portal
@@ -223,3 +223,33 @@ class CliPortalTest(TempDirTest):
             json.dump({"modules": {"proofpoint": {"options": {"secret": "x"}}}}, f)
         with self.assertRaises(orch.ConfigError):
             orch.run(p, dry_run=True)
+
+
+class CollectCacheTest(TempDirTest):
+    def test_settled_hours_and_people_reused(self):
+        from securityhub.cache import Store
+        calls = []
+
+        def fake(req, timeout, context):
+            calls.append(req.full_url)
+            if "/siem/" in req.full_url:
+                body = {"messagesDelivered": [], "clicksPermitted": [], "messagesBlocked": [{"recipient": ["a@contoso.com"]}]}
+            else:
+                body = {"users": []}
+            return FakeResponse(json.dumps(body).encode())
+        t0 = datetime(2026, 11, 2, 10, 5, tzinfo=timezone.utc)
+        with mock.patch.object(tapapi.urllib.request, "urlopen", fake):
+            store1 = Store("pp", path=self.path("c.json"), now=t0)
+            first = tapapi.collect(tapapi.TapAPI("p", "s", qps=0), lambda m: None, hours=24, now=t0, store=store1)
+            store1.save()
+            n1 = len(calls)
+            later = t0 + timedelta(hours=4)
+            store = Store("pp", path=self.path("c.json"), now=later)
+            second = tapapi.collect(tapapi.TapAPI("p", "s", qps=0), lambda m: None, hours=24, now=later, store=store)
+        siem2 = sum("/siem/" in c for c in calls[n1:])
+        self.assertEqual(n1, 24 + 2)
+        self.assertEqual(siem2, 5)                  # 4 new hours + the hour that had not settled at the first run
+        self.assertEqual(second["siem_hours_reused"], 19)
+        self.assertTrue(second["people_reused"])
+        self.assertEqual(first["blocked"]["contoso.com"]["messages"], 24)
+        self.assertEqual(second["blocked"]["contoso.com"]["messages"], 24)   # same totals from cache + new hours

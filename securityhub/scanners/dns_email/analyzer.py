@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ssl
+from dataclasses import asdict, fields
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -17,7 +18,7 @@ from .constants import (CHECKS, CHECK_ATTRS, CHECK_DEPENDENCIES, DEFAULT_CHECKS,
                         PROTECTED_MX_PROVIDERS, SEVERITY_RANK)
 from .dnsclient import DNSClient
 from .domains import org_domain, tier_weight
-from .models import DomainInput, DomainResult, make_issue
+from .models import DomainInput, DomainResult, Issue, make_issue
 from .rdap import RDAPClient
 from .remediation import suggest_remediation
 from .scoring import Scoring
@@ -37,7 +38,8 @@ class EmailSecurityAnalyzer(AuthChecks, TransportChecks, DNSHygieneChecks, Expos
                  checks: Optional[List[str]] = None, dns_client: Optional[DNSClient] = None,
                  rdap: Optional[RDAPClient] = None, allow_private: bool = False,
                  report_data: Optional[Dict[str, dict]] = None, known_domains: Iterable[str] = (),
-                 lookalike_limit: int = 150, lookalike_tiers: Optional[Set[str]] = None, qps: float = 0):
+                 lookalike_limit: int = 150, lookalike_tiers: Optional[Set[str]] = None, qps: float = 0,
+                 cache=None, discovery_max_age: float = 24.0):
         self.timeout = timeout
         self.checks = set(checks or DEFAULT_CHECKS)
         unknown = self.checks - set(CHECKS)
@@ -75,6 +77,28 @@ class EmailSecurityAnalyzer(AuthChecks, TransportChecks, DNSHygieneChecks, Expos
         self._org_lock = threading.Lock()
         self._wildcard_tlds: Dict[str, bool] = {}
         self._ssl_ctx = ssl.create_default_context()
+        # Discovery results kept between runs (securityhub.cache.Store): full DKIM selector search, lookalikes,
+        # name server consistency, zone transfer test, MTA-STS policy body. Core records are always queried.
+        self.cache = cache
+        self.discovery_max_age = discovery_max_age
+
+    def _cached(self, section: str, key: str, cls, fn, fingerprint: Optional[str] = None):
+        """fn() or, when a recent result is stored, that result (rebuilt as `cls`). Unknown / DNS-error
+        results are never stored: they are retried on the next run."""
+        if self.cache is None:
+            return fn()
+        stored = self.cache.get(section, key, self.discovery_max_age, fingerprint)
+        if isinstance(stored, dict):
+            try:
+                names = {f.name for f in fields(cls)}
+                data = {k: v for k, v in stored.items() if k in names and k != "issues"}
+                return cls(**data, issues=[Issue(**i) for i in stored.get("issues") or []])
+            except TypeError:
+                pass  # stored by another version: compute again
+        res = fn()
+        if getattr(res, "status", None) not in ("unknown", "dns_error", "skipped"):
+            self.cache.put(section, key, asdict(res), fingerprint)
+        return res
 
     def close(self):
         self._pool.shutdown(wait=False, cancel_futures=True)

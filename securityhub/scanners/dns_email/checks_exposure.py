@@ -157,6 +157,10 @@ class ExposureChecks:
     CONSISTENCY_RECORDS = (("", "MX"), ("", "TXT"), ("_dmarc.", "TXT"), ("", "NS"))
 
     def _analyze_consistency(self, domain: str) -> ConsistencyResult:
+        return self._cached("consistency", domain, ConsistencyResult, lambda: self._consistency_now(domain),
+                            ",".join(self.dns.nameservers))
+
+    def _consistency_now(self, domain: str) -> ConsistencyResult:
         res = ConsistencyResult()
         own = org_domain(domain)
         ns = self.dns.query(domain, "NS")
@@ -221,6 +225,17 @@ class ExposureChecks:
         res.base = org
 
         def compute():
+            if self.cache is not None:  # registered lookalikes change slowly: searched at most once per period
+                stored = self.cache.get("lookalikes", org, self.discovery_max_age, str(self.lookalike_limit))
+                if isinstance(stored, list) and len(stored) == 2:
+                    return stored[0], [e for e in stored[1] if e.get("domain") not in self.known_domains
+                                       and org_domain(e.get("domain", "")) not in self.known_orgs]
+            n, found = compute_now()
+            if self.cache is not None and not any(e.get("dns") == "error" for e in found):
+                self.cache.put("lookalikes", org, [n, found], str(self.lookalike_limit))
+            return n, found
+
+        def compute_now():
             candidates = generate_lookalikes(org, self.lookalike_limit)
 
             def check(item):

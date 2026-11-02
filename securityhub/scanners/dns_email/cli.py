@@ -161,6 +161,10 @@ Exit codes: 0 ok, 1 usage/input/resolver error, 2 a domain scored below --fail-u
     parser.add_argument("--no-http", action="store_true", help="Do not fetch MTA-STS policies over HTTPS")
     parser.add_argument("--allow-private", action="store_true",
                         help="Allow MTA-STS fetches to private/loopback addresses (internal assessments only)")
+    parser.add_argument("--cache-max-age", type=float, default=24.0,
+                        help="Reuse discovery results younger than N hours: full DKIM selector search, RDAP, lookalikes, "
+                             "consistency, zone transfer, MTA-STS policy (default: 24; 0 = always redo)")
+    parser.add_argument("--no-cache", action="store_true", help="Do not read or write the discovery cache")
     parser.add_argument("--no-rdap", action="store_true", help="Skip RDAP registration lookups (takeover/lookalikes)")
     parser.add_argument("--offline", action="store_true",
                         help="No downloads at all (PSL, RDAP): use cached data or fallbacks")
@@ -286,9 +290,12 @@ def main(argv: Optional[List[str]] = None, command: str = "dns") -> int:
         unscanned = sorted(d for d in report_data if d not in scanned)
         notes.append(f"DMARC reports: {n_reports} aggregate reports loaded.")
 
+    from ...cache import Store
+    store = Store("dns-email", enabled=not args.no_cache and args.cache_max_age > 0)
     rdap = None
     if ("takeover" in checks or "lookalikes" in checks) and not args.no_rdap and not args.offline:
-        rdap = RDAPClient(timeout=max(args.timeout, 8.0))
+        rdap = RDAPClient(timeout=max(args.timeout, 8.0), store=store if store.enabled else None,
+                          max_age_hours=args.cache_max_age)
     lookalike_tiers = {TIER_ALIASES.get(t.strip().lower(), t.strip().lower())
                        for t in args.lookalike_tiers.split(",") if t.strip()} or None
 
@@ -305,7 +312,8 @@ def main(argv: Optional[List[str]] = None, command: str = "dns") -> int:
                                      http_checks=not args.no_http, dkim_threads=min(64, workers * 4),
                                      checks=checks, dns_client=client, rdap=rdap, allow_private=args.allow_private,
                                      report_data=report_data, known_domains=[i.domain for i in inputs],
-                                     lookalike_limit=args.lookalike_limit, lookalike_tiers=lookalike_tiers)
+                                     lookalike_limit=args.lookalike_limit, lookalike_tiers=lookalike_tiers,
+                                     cache=store if store.enabled else None, discovery_max_age=args.cache_max_age)
     analyzer.extra_selectors = extra
     progress = Progress(len(inputs), args.quiet)
     executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="domain")
@@ -331,6 +339,17 @@ def main(argv: Optional[List[str]] = None, command: str = "dns") -> int:
     results.sort(key=lambda x: (-x.priority, x.domain))
     if rdap and rdap.note:
         notes.append(rdap.note)
+    if store.enabled and not interrupted:
+        problem = store.save()
+        if problem:
+            print(f"Warning: discovery cache not saved ({problem})", file=sys.stderr)
+    reused = {k: v for k, v in store.hits.items() if v}
+    if reused:
+        names = {"dkim": "DKIM selector search", "rdap": "RDAP registration data", "lookalikes": "lookalike search",
+                 "consistency": "name server consistency", "axfr": "zone transfer test", "mta-sts": "MTA-STS policy"}
+        notes.append(f"Reused from runs of the last {args.cache_max_age:g} hours (they change slowly; core records "
+                     "were queried now): " + ", ".join(f"{names.get(k, k)} {v}" for k, v in sorted(reused.items())) + ".")
+        stats_line += ", reused: " + ", ".join(f"{k} {v}" for k, v in sorted(reused.items()))
     base_meta = {"resolver": "System resolver" if args.system_resolver else f"Resolvers: {', '.join(nameservers)}",
                  "stats": stats_line, "notes": notes, "unscanned_report_domains": unscanned}
 

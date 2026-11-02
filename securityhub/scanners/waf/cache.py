@@ -22,8 +22,8 @@ HEAVY_PROBE_KEYS = ("tls10", "tls11", "origins")
 
 
 def cache_path(account_id: Any) -> str:
-    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
-    return os.path.join(base, "securityhub", f"waf-{account_id}.json")
+    from ...cache import cache_dir
+    return os.path.join(cache_dir(), f"waf-{account_id}.json")
 
 
 def load(path: str) -> Dict[str, dict]:

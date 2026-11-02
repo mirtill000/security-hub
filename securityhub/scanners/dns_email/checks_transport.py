@@ -53,7 +53,14 @@ class TransportChecks:
             result.status = "partial"
             return result
 
-        body, note = self._fetch_policy(f"mta-sts.{domain}", "/.well-known/mta-sts.txt")
+        # The policy only changes together with its id (RFC 8461): a recent copy for the same id is reused.
+        stored = self.cache.get("mta-sts", domain, self.discovery_max_age, result.policy_id or "") if self.cache else None
+        if isinstance(stored, list) and len(stored) == 2:
+            body, note = stored
+        else:
+            body, note = self._fetch_policy(f"mta-sts.{domain}", "/.well-known/mta-sts.txt")
+            if body is not None and self.cache is not None:
+                self.cache.put("mta-sts", domain, [body, note], result.policy_id or "")
         if body is None:
             result.status = "error"
             result.policy_error = note

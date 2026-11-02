@@ -17,7 +17,8 @@ class RDAPClient:
     BOOTSTRAP_URL = "https://data.iana.org/rdap/dns.json"
     MAX_ERRORS = 25
 
-    def __init__(self, timeout: float = 10.0, max_parallel: int = 4, allow_download: bool = True):
+    def __init__(self, timeout: float = 10.0, max_parallel: int = 4, allow_download: bool = True,
+                 store=None, max_age_hours: float = 24.0):
         self.timeout = timeout
         self.allow_download = allow_download
         self._bootstrap: Optional[Dict[str, str]] = None
@@ -27,6 +28,10 @@ class RDAPClient:
         self._lock = threading.Lock()
         self._sem = threading.Semaphore(max_parallel)
         self.errors = 0
+        # registration data kept between runs (securityhub.cache.Store); "unregistered" is never kept:
+        # it is the takeover signal and must be confirmed on every run
+        self.store = store
+        self.max_age_hours = max_age_hours
         self.enabled = True
         self.note = ""
 
@@ -77,7 +82,13 @@ class RDAPClient:
             ev.wait()
         result = {"state": "unknown"}
         try:
-            result = self._lookup(domain)
+            stored = self.store.get("rdap", domain, self.max_age_hours) if self.store is not None else None
+            if isinstance(stored, dict):
+                result = stored
+            else:
+                result = self._lookup(domain)
+                if self.store is not None and result.get("state") in ("registered", "expiring"):
+                    self.store.put("rdap", domain, result)
         finally:
             with self._lock:
                 self._cache[domain] = result

@@ -83,6 +83,9 @@ class DNSHygieneChecks:
     # ------------------------------------------------------------------
 
     def _analyze_axfr(self, domain: str) -> AXFRResult:
+        return self._cached("axfr", domain, AXFRResult, lambda: self._axfr_now(domain))
+
+    def _axfr_now(self, domain: str) -> AXFRResult:
         res = AXFRResult()
         ns = self.dns.query(domain, "NS")
         hosts = sorted(set(ns.records))[:AXFR_MAX_SERVERS] if ns.status == "ok" else []

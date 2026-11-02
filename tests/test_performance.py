@@ -1,5 +1,6 @@
 """Scan cost: two-round DKIM probing, cap on concurrent DNS queries, light portal history."""
 
+import json
 import os
 import threading
 import time
@@ -95,3 +96,26 @@ class LightHistoryTest(TempDirTest):
         self.assertIn("html", reports[0])
         self.assertIsInstance(reports[0]["payload"], dict)
         self.assertEqual(len(history["runs"]), 3)
+
+
+class NetworkSlotsTest(TempDirTest):
+    def test_heavy_modules_do_not_overlap(self):
+        spans, lock = {}, threading.Lock()
+
+        def fake_run(name, argv, out_html, log_path, timeout=None, echo=None, procs=None, cmd=None):
+            t = time.monotonic()
+            time.sleep(0.3)
+            with lock:
+                spans[name] = (t, time.monotonic())
+            return orch.ModuleResult(name, 0, 0.3, argv=argv, log=log_path)
+        p = self.path("c.json")
+        with open(p, "w") as f:
+            json.dump({"output_dir": "out", "modules": {
+                "waf": {"options": {"from_json": fixture("waf_snapshot.json")}},
+                "proofpoint": {"options": {"from_json": fixture("pp_snapshot.json")}},
+                "edr": {"options": {"from_json": fixture("s1_snapshot.json")}}}}, f)
+        with mock.patch.object(orch, "run_module", fake_run), silenced():
+            orch.run(p)
+        overlap = lambda a, b: spans[a][0] < spans[b][1] and spans[b][0] < spans[a][1]
+        self.assertFalse(overlap("waf", "proofpoint"))                 # network-heavy: one at a time
+        self.assertTrue(overlap("edr", "waf") or overlap("edr", "proofpoint"))   # API-only modules keep running

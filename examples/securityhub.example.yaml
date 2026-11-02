@@ -7,6 +7,7 @@ keep_runs: 12                            # older run folders are deleted (0 = ke
 # fail_under: 70                         # exit code 2 if an area / asset scores below this
 # auto_baseline: true                    # compare every module with its previous run
 # max_parallel: 3                        # modules run at the same time (1 = one after the other)
+# max_parallel_network: 1                # of which DNS / Internet-probing ones (email+dns, proofpoint, waf): default 1
 # max_age_days: {email: 2, dns: 2, proofpoint: 2, waf: 2, edr: 2, zta: 35}  # data older than this is flagged as stale in portal and summary
 # publish: /var/www/html/securityhub     # after each run copy the portal there as index.html (web server)
 #   or: publish: {dir: /var/www/html/securityhub, posture: true, mode: "0640"}
@@ -34,6 +35,7 @@ modules:
       # nameservers: [1.1.1.1, 8.8.8.8]  # shared with email: set the same value in both, or the scans are separate
       # qps: 50                          # max DNS queries per second (default: unlimited)
       # max_inflight: 32                 # max DNS queries on the wire at once (default 32: router friendly)
+      # cache_max_age: 24                # hours: full DKIM search, RDAP, lookalikes... redone once a day (0 = every run)
 
   # Proofpoint email protection: mail routing from public DNS + TAP (SIEM and People APIs, read-only)
   # Credentials: export PROOFPOINT_PRINCIPAL=... PROOFPOINT_SECRET=...  (TAP service principal; never in this file)
