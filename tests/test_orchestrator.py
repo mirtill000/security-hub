@@ -262,3 +262,17 @@ class ParallelTest(TempDirTest):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OnlyAliasTest(TempDirTest):
+    def test_command_names_accepted_in_only(self):
+        p = self.path("c.json")
+        with open(p, "w") as f:
+            json.dump({"modules": {"ias": {"options": {"from_json": fixture("ias_snapshot.json")}},
+                                   "edr": {"options": {"from_json": fixture("s1_snapshot.json")}}}}, f)
+        with silenced() as (out, err):
+            self.assertEqual(orch.run(p, only=["sap-ias"], dry_run=True), 0)
+            self.assertEqual(orch.run(p, only=["sap", "S1"], dry_run=True), 0)
+        with self.assertRaises(orch.ConfigError) as cm:
+            orch.run(p, only=["nope"], dry_run=True)
+        self.assertIn("available:", str(cm.exception))

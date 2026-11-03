@@ -59,7 +59,7 @@ def _run_cmd(argv: List[str]) -> int:
     p = Parser(prog="securityhub run", description="Run every enabled module (in parallel, each in its own process with a log), "
                                                    "then rebuild the portal and posture.json")
     p.add_argument("-c", "--config", default=DEFAULT_CONFIG, help=f"Configuration file (default: {DEFAULT_CONFIG})")
-    p.add_argument("--only", default="", help="Only these modules, comma-separated (dns,waf,zta)")
+    p.add_argument("--only", default="", help="Only these modules, comma-separated (e.g. dns,waf,ias)")
     p.add_argument("-o", "--output-dir", help="Override output_dir of the configuration")
     p.add_argument("--dry-run", action="store_true", help="Show the commands that would run, without running them")
     p.add_argument("-q", "--quiet", action="store_true", help="No progress, only the posture (and why a module failed)")

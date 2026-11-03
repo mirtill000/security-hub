@@ -46,6 +46,9 @@ MODULES: Dict[str, Tuple[str, Optional[str], str]] = {
     "zta": ("securityhub.scanners.zero_trust", "input", "Microsoft Zero Trust (ZTAGuard)"),
 }
 ORDER = list(MODULES)
+# Command names and aliases accepted wherever a module name is expected (--only)
+MODULE_ALIASES = {"sap-ias": "ias", "sap": "ias", "sentinelone": "edr", "s1": "edr", "pp": "proofpoint", "tap": "proofpoint",
+                  "mail": "email", "e-mail": "email", "zt": "zta", "zerotrust": "zta", "imperva": "waf"}
 MAILGUARD = ("email", "dns")
 # Modules that generate a lot of network traffic (DNS queries, Internet probes): at most max_parallel_network
 # of them run at the same time (default 1), so their peaks never add up. The others (API reads of a few
@@ -487,9 +490,10 @@ def run(config_path: str, only: Optional[List[str]] = None, dry_run: bool = Fals
     mods = cfg.get("modules") or {}
     selected = [m for m in ORDER if m in mods and (mods[m] or {}).get("enabled", True)]
     if only:
+        only = [MODULE_ALIASES.get(str(m).strip().lower(), str(m).strip().lower()) for m in only]
         bad = set(only) - set(ORDER)
         if bad:
-            raise ConfigError(f"unknown module(s) in --only: {', '.join(sorted(bad))}")
+            raise ConfigError(f"unknown module(s) in --only: {', '.join(sorted(bad))} (available: {', '.join(ORDER)})")
         selected = [m for m in ORDER if m in only and m in mods]
         missing = set(only) - set(selected)
         if missing:
