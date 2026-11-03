@@ -536,10 +536,20 @@ def check_tls(site: dict, probe: Optional[dict]) -> CheckResult:
                      "tls10": probe.get("tls10"), "tls11": probe.get("tls11"),
                      "served_tls": (probe.get("https") or {}).get("tls_version"),
                      "served_cert_days": (probe.get("https") or {}).get("cert_days")})
-        if probe.get("hsts"):
+        hsts = probe.get("hsts_check")
+        if hsts is None:  # probe from an earlier version: header only, and no way to tell a failed request
+            failed = not (probe.get("https") or {}).get("ok", True) or (probe.get("https") or {}).get("error")
+            hsts = {"state": "present" if probe.get("hsts") else "unknown" if failed else "missing",
+                    "header": probe.get("hsts")}
+        data["hsts_check"] = hsts
+        if hsts.get("state") == "present":
             c.got += 1
+        elif hsts.get("state") == "unknown":
+            c.max -= 1  # not verifiable from the Internet: not counted as failed
         elif has_cert:
-            c.issues.append(make_issue("TLS_NO_HSTS"))
+            detail = ("max-age=0 disables it" if hsts.get("state") == "disabled" and hsts.get("max_age") == 0 else
+                      "header without max-age" if hsts.get("state") == "disabled" else hsts.get("reason") or "")
+            c.issues.append(make_issue("TLS_NO_HSTS", detail or None))
         if probe.get("redirects_https"):
             c.got += 1
         elif probe.get("http_status") is not None and has_cert:

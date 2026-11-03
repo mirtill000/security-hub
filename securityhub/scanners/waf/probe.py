@@ -38,8 +38,9 @@ def _resolve(host: str) -> Tuple[List[str], List[str]]:
     return cnames, addrs
 
 
-def _http_head(host: str, ip: Optional[str], port: int, use_tls: bool, timeout: float, verify: bool) -> dict:
-    """Minimal HTTP/1.1 request; returns status, headers and certificate info."""
+def _http_head(host: str, ip: Optional[str], port: int, use_tls: bool, timeout: float, verify: bool,
+               path: str = "/", body_bytes: int = 0) -> dict:
+    """Minimal HTTP/1.1 request; returns status, headers, certificate info and (body_bytes > 0) the start of the body."""
     out: Dict[str, Any] = {"ok": False}
     target = ip or host
     try:
@@ -56,13 +57,20 @@ def _http_head(host: str, ip: Optional[str], port: int, use_tls: bool, timeout: 
                 exp = datetime.fromtimestamp(ssl.cert_time_to_seconds(cert["notAfter"]), timezone.utc)
                 out["cert_days"] = (exp - datetime.now(timezone.utc)).days
             out["tls_version"] = sock.version()
-        sock.sendall(f"GET / HTTP/1.1\r\nHost: {host}\r\nUser-Agent: {USER_AGENT}\r\nAccept: */*\r\nConnection: close\r\n\r\n".encode())
+        sock.sendall(f"GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: {USER_AGENT}\r\nAccept: */*\r\nConnection: close\r\n\r\n".encode())
         data = b""
         while b"\r\n\r\n" not in data and len(data) < 65536:
             chunk = sock.recv(4096)
             if not chunk:
                 break
             data += chunk
+        while body_bytes and b"\r\n\r\n" in data and len(data.split(b"\r\n\r\n", 1)[1]) < body_bytes:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        if body_bytes and b"\r\n\r\n" in data:
+            out["body"] = data.split(b"\r\n\r\n", 1)[1][:body_bytes].decode("utf-8", errors="replace")
         head = data.split(b"\r\n\r\n", 1)[0].decode("iso-8859-1", errors="replace").split("\r\n")
         m = re.match(r"HTTP/\d\.\d (\d{3})", head[0] if head else "")
         out["status"] = int(m.group(1)) if m else None
@@ -98,6 +106,58 @@ def _accepts_tls(host: str, version: ssl.TLSVersion, timeout: float) -> Optional
         return None
 
 
+# Imperva block / bot challenge pages: what the probe got is not the website, so HSTS cannot be judged
+CHALLENGE_MARKERS = ("_incapsula_resource", "incapsula incident", "request unsuccessful")
+
+
+def hsts_max_age(value: Optional[str]) -> Optional[int]:
+    m = re.search(r'max-age\s*=\s*"?(\d+)', value or "", re.I)
+    return int(m.group(1)) if m else None
+
+
+def check_hsts(host: str, first: dict, timeout: float, fetch=None) -> dict:
+    """HSTS as a browser receives it: the header of the first HTTPS response, or of a later response of the
+    same-host redirect chain (e.g. / -> /en/). States:
+      present  - header with max-age > 0
+      disabled - header with max-age=0 or without max-age
+      missing  - the site answered normally and no response of the chain carries the header
+      unknown  - not verifiable: HTTPS failed, or the probe got a WAF block / bot challenge page instead of the site
+    includeSubDomains and preload are reported, not evaluated."""
+    fetch = fetch or (lambda path: _http_head(host, None, 443, True, timeout, True, path, 4096))
+    resp, path, hops = first, "/", 0
+    while True:
+        if not resp.get("ok"):
+            return {"state": "unknown", "reason": resp.get("error") or "no HTTPS answer", "path": path}
+        value = (resp.get("headers") or {}).get("strict-transport-security")
+        if value:
+            age = hsts_max_age(value)
+            return {"state": "present" if age else "disabled", "header": value, "max_age": age, "path": path,
+                    "status": resp.get("status"), "include_subdomains": "includesubdomains" in value.lower(),
+                    "preload": "preload" in value.lower()}
+        status = resp.get("status") or 0
+        loc = (resp.get("headers") or {}).get("location", "")
+        nxt = None
+        if 300 <= status < 400 and loc:
+            if loc.startswith("/") and not loc.startswith("//"):
+                nxt = loc
+            else:
+                m = re.match(r"https://([^/:?#]+)(?::443)?(/[^#]*)?$", loc, re.I)
+                if m and m.group(1).lower() == host:
+                    nxt = m.group(2) or "/"
+        if nxt and hops < 3:
+            hops += 1
+            path = nxt
+            resp = fetch(path)
+            continue
+        body = (resp.get("body") or "").lower()
+        if status in (401, 403, 405, 406, 429) or status >= 500 or any(k in body for k in CHALLENGE_MARKERS):
+            return {"state": "unknown", "reason": f"HTTP {status}: blocked or challenged by the WAF", "path": path,
+                    "status": status}
+        if 300 <= status < 400:
+            return {"state": "missing", "path": path, "status": status, "reason": f"redirect to {loc[:80]} without HSTS"}
+        return {"state": "missing", "path": path, "status": status}
+
+
 def probe_site(site: dict, timeout: float = 6.0, heavy: bool = True) -> dict:
     """Read-only checks from the Internet. Origin probes only send one GET / per origin address.
 
@@ -120,10 +180,11 @@ def probe_site(site: dict, timeout: float = 6.0, heavy: bool = True) -> dict:
             routed = None if not expected else False
     res["routed"] = routed
     if addrs:
-        https = _http_head(host, None, 443, True, timeout, True)
-        res["https"] = {k: v for k, v in https.items() if k != "headers"}
+        https = _http_head(host, None, 443, True, timeout, True, "/", 4096)
+        res["https"] = {k: v for k, v in https.items() if k not in ("headers", "body")}
         hdrs = https.get("headers") or {}
-        res["hsts"] = hdrs.get("strict-transport-security")
+        res["hsts_check"] = check_hsts(host, https, timeout)
+        res["hsts"] = res["hsts_check"].get("header")
         res["imperva_edge"] = bool(hdrs.get("x-iinfo") or "imperva" in hdrs.get("x-cdn", "").lower())
         http = _http_head(host, None, 80, False, timeout, False)
         loc = (http.get("headers") or {}).get("location", "")

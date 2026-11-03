@@ -422,7 +422,7 @@ function tabConfig(r) {
         : '<p class="sub" style="margin-top:10px">Traffic statistics not available: the threshold could not be compared with real traffic.</p>'}`, pill(r._st('ddos'))); }
   if (vis(r, 'tls')) { const d = cd(r, 'tls');
     h += sec('tls', 'TLS', `<div class="kv">${kv('Certificate', d.certificate)}${kv('Expires', d.expires)}${kv('Days left', d.days_left)}${kv('Validation', d.validation)}${kv('TLS to origin', yesNo(d.origin_tls))}
-      ${r.probed ? kv('HSTS', d.hsts || 'not served') + kv('HTTP to HTTPS redirect', yesNo(d.redirects_https)) + kv('TLS 1.0 accepted', yesNo(d.tls10)) + kv('TLS 1.1 accepted', yesNo(d.tls11)) + kv('Negotiated', d.served_tls) : ''}</div>
+      ${r.probed ? kv('HSTS', (() => { const h = d.hsts_check || {}; return h.state === 'present' ? `${h.header}${h.path && h.path !== '/' ? ' (on ' + h.path + ')' : ''}` : h.state === 'unknown' ? `not verifiable: ${h.reason || 'no answer'}` : h.state === 'disabled' ? `disabled: ${h.header}` : (d.hsts || 'not served') + (h.reason ? ` (${h.reason})` : ''); })()) + kv('HTTP to HTTPS redirect', yesNo(d.redirects_https)) + kv('TLS 1.0 accepted', yesNo(d.tls10)) + kv('TLS 1.1 accepted', yesNo(d.tls11)) + kv('Negotiated', d.served_tls) : ''}</div>
       ${r.probed ? '' : '<p class="sub" style="margin-top:10px">HSTS, redirect and legacy TLS are tested with --probe.</p>'}`, pill(r._st('tls'))); }
   return h;
 }
