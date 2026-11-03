@@ -155,7 +155,8 @@ def print_posture(summary: dict, file: TextIO = None) -> None:
     print(st("SECURITY POSTURE", "bold") + "  " + st(f" {STATUS_TEXT.get(s0, s0).upper()} ", "bold", STATUS_TONE.get(s0, "dim"))
           + (st("  " + " \u00b7 ".join(parts) if st.dot != "-" else "  " + ", ".join(parts), "dim") if parts else ""), file=out)
     if ov and not ov.get("complete", True):
-        gaps = ([f"stale: {', '.join(ov['stale'])}"] if ov.get("stale") else []) + \
+        gaps = ([f"update failed: {', '.join(ov['failed'])}"] if ov.get("failed") else []) + \
+               ([f"stale: {', '.join(ov['stale'])}"] if ov.get("stale") else []) + \
                ([f"not verified: {', '.join(ov['not_verified'])}"] if ov.get("not_verified") else [])
         print(st(f"{st.warn} Incomplete picture - {'; '.join(gaps)}", "yellow"), file=out)
     print(st(st.rule * 72, "dim"), file=out)
@@ -168,6 +169,10 @@ def print_posture(summary: dict, file: TextIO = None) -> None:
         gr = a.get("grade") or "-"
         print(f"  {a['label']:<26} {st(f'{gr:>2}', 'bold', GRADE_TONE.get(gr, ''))} {score}  "
               f"{st(f'{STATUS_TEXT.get(s, s):<12}', STATUS_TONE.get(s, 'dim'))} {age_txt(a, st)}", file=out)
+        if a.get("last_run_failed"):
+            why = a["last_run_failed"].get("error") or "?"
+            since = str(a.get("date") or "?")[:10]
+            print(f"  {'':<26} " + st(f"{st.fail} last update failed ({why}): data shown is from {since}", "red"), file=out)
         if a.get("headline"):
             print(f"  {'':<26} {st(a['headline'], 'dim')}", file=out)
         for k in a.get("kpis", []):

@@ -313,12 +313,15 @@ function fresh(r) {
     txt: age === null ? '' : age < 1 ? 'today' : `${Math.floor(age)} day${Math.floor(age) === 1 ? '' : 's'} old`};
 }
 const freshTag = r => { const f = fresh(r); if (f.age === null) return '';
-  return `<span class="fresh${f.stale ? ' stale' : ''}" title="Data from ${esc(fmtD(r.date))}; flagged as stale after ${esc(f.lim)} days">${f.stale ? '\u26A0 ' : ''}Data ${esc(f.txt)}${f.stale ? ` (limit ${esc(f.lim)} days)` : ''}</span>`; };
+  return `<span class="fresh${f.stale ? ' stale' : ''}" title="Data from ${esc(fmtD(r.date))}; flagged as stale after ${esc(f.lim)} days">${f.stale ? '\u26A0 ' : ''}Data ${esc(f.txt)}${f.stale ? ` (limit ${esc(f.lim)} days)` : ''}</span>${(M.failed || {})[r.type] ? ' <span class="fresh stale" title="' + esc(M.failed[r.type].error || '') + '">\u26A0 Last update failed</span>' : ''}`; };
+const FAILED = M.failed || {};
 function staleBanner() {
-  const st = RP.filter(r => r.exec && fresh(r).stale);
-  if (!st.length) return '';
-  return `<div class="card stale-banner" role="status"><b>Incomplete picture:</b> ${st.map(r => `${esc(r.label)} data is ${esc(fresh(r).txt)} (limit ${esc(fresh(r).lim)} days)`).join('; ')}.
-    Figures for ${st.length === 1 ? 'this area' : 'these areas'} may not reflect the current state: re-run the assessment.</div>`;
+  const fl = RP.filter(r => FAILED[r.type]);
+  const st = RP.filter(r => r.exec && fresh(r).stale && !FAILED[r.type]);
+  if (!st.length && !fl.length) return '';
+  return `<div class="card stale-banner" role="status">${fl.length ? `<b>Last update failed:</b> ${fl.map(r => `${esc(r.label)} (${esc(FAILED[r.type].error || 'error')}): the data shown is from ${esc(fmtD(r.date))}`).join('; ')}. See the run log on the server.` : ''}
+    ${st.length ? `${fl.length ? '<br>' : ''}<b>Incomplete picture:</b> ${st.map(r => `${esc(r.label)} data is ${esc(fresh(r).txt)} (limit ${esc(fresh(r).lim)} days)`).join('; ')}.
+    Figures for ${st.length === 1 ? 'this area' : 'these areas'} may not reflect the current state: re-run the assessment.` : ''}</div>`;
 }
 const deltaTxt = d => !d || (d.improved === null && d.worsened === null) ? '' :
   `<span class="delta-up">${d.improved || 0} better</span>, <span class="delta-down">${d.worsened || 0} worse</span> since the baseline`;
@@ -337,7 +340,7 @@ function overview() {
   const order = ['spoof', 'pp_routing', 'pp_clicks', 'dnssec', 'caa', 'waf', 'edr_protect', 'edr_coverage', 'edr_health', 'pp_delivered', 'zt', 'mfa', 'pr', 'dev'];
   const kpis = areas.flatMap(r => r.exec.kpis.map(k => ({...k, r}))).sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key)).slice(0, 8);
   const hero = `<section class="card exec-hero"><div><p class="exec-kicker">${esc(M.title)}</p><h2 class="exec-headline">${esc(PF.sentence || '')}</h2>
-      <div class="exec-chips">${RP.map(r => { const st = AREA_ST[(r.exec || {}).status || 'unknown']; return `<button class="exec-chip" data-open="${r.id}"><i class="dot c-${st[1]}"></i>${esc(r.label)}<span>${esc(st[0])}${fresh(r).stale ? ' \u00b7 stale data' : ''}</span></button>`; }).join('')}</div></div>
+      <div class="exec-chips">${RP.map(r => { const st = AREA_ST[(r.exec || {}).status || 'unknown']; return `<button class="exec-chip" data-open="${r.id}"><i class="dot c-${st[1]}"></i>${esc(r.label)}<span>${esc(st[0])}${FAILED[r.type] ? ' \u00b7 update failed' : fresh(r).stale ? ' \u00b7 stale data' : ''}</span></button>`; }).join('')}</div></div>
     <div class="exec-meta">${RP.length} report${RP.length === 1 ? '' : 's'}<br>Portal generated ${esc(M.generated)}</div></section>`;
   const kpiHtml = kpis.length ? `<div class="exec-kpis" style="--kcols:${kpis.length <= 4 ? kpis.length : kpis.length % 4 === 0 || kpis.length === 7 ? 4 : 3}">${kpis.map(k => { const t = tone(k), v = k.value === null || k.value === undefined ? null : k.value;
     return `<button class="exec-kpi t-${t}" data-go="${k.r.id}" data-h="${esc(k.hash)}" title="Open in ${esc(k.r.label)}">

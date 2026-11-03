@@ -770,8 +770,10 @@ def split_history(reports: List[dict]) -> Tuple[List[dict], dict]:
 
 
 def build_hub(reports: List[dict], out: str, title: str, history: Optional[dict] = None,
-              max_age: Optional[Dict[str, float]] = None) -> int:
+              max_age: Optional[Dict[str, float]] = None, failed: Optional[Dict[str, dict]] = None) -> int:
+    """failed: area -> {"at", "error"} for the areas whose module failed in the latest run (their data is older)."""
     meta = {"version": __version__, "title": title, "generated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+            "failed": failed or {},
             "max_age_days": {**MAX_AGE_DAYS, **(max_age or {})},
             "portfolio": portfolio(reports), "history": history or {"series": [], "runs": []},
             "inventory": inventory.build(reports)}
@@ -842,12 +844,13 @@ def overall_status(areas: List[dict]) -> dict:
     counts["unknown"] = len(areas) - sum(counts.values())
     stale = [a["label"] for a in areas if a.get("stale")]
     unverified = [a["label"] for a in areas if a.get("status") not in STATUS_RANK]
-    return {"status": status, "areas": counts, "stale": stale, "not_verified": unverified,
-            "complete": not stale and not unverified}
+    failed = [a["label"] for a in areas if a.get("last_run_failed")]
+    return {"status": status, "areas": counts, "stale": stale, "not_verified": unverified, "failed": failed,
+            "complete": not stale and not unverified and not failed}
 
 
 def posture(reports: List[dict], history: Optional[dict] = None, max_age: Optional[Dict[str, float]] = None,
-            now: Optional[datetime] = None) -> dict:
+            now: Optional[datetime] = None, failed: Optional[Dict[str, dict]] = None) -> dict:
     """Machine-readable posture summary (for monitoring, SIEM ingestion or CI gates)."""
     areas = []
     for r in reports:
@@ -860,6 +863,7 @@ def posture(reports: List[dict], history: Optional[dict] = None, max_age: Option
             "kpis": [{k: v for k, v in kpi.items() if k in ("key", "label", "value", "unit", "detail", "target", "trend")}
                      for kpi in ex.get("kpis", [])],
             "actions": ex.get("actions", [])[:5],
+            **({"last_run_failed": (failed or {})[r["type"]]} if r["type"] in (failed or {}) else {}),
         })
     pf = portfolio(reports)
     inv = inventory.build(reports, now)

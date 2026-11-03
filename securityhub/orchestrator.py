@@ -649,10 +649,19 @@ def _execute(cfg, plans, out_dir, stamp, when, run_dir, parallel, max_age, fail_
     removed = prune_runs(out_dir, int(cfg.get("keep_runs", 12) or 0))
     if removed and not quiet:
         say(err(f"Removed {len(removed)} old run{'s' if len(removed) != 1 else ''} (keep_runs={cfg.get('keep_runs')})", "dim"))
+    # Areas whose module failed now: the portal still shows their previous data, and must say so.
+    failed: Dict[str, dict] = {}
+    for r in ordered:
+        if r.error or r.code not in (EXIT_OK, EXIT_FAIL_UNDER):
+            why = next((l.strip() for l in reversed(_tail(r.log)) if l.strip().lower().startswith(("error", "securityhub"))), "")
+            info = {"at": stamp, "error": ("timed out" if r.timed_out else r.error or f"exit code {r.code}")
+                    + (f": {why}" if why else ""), "log": r.log}
+            for area in [r.name] + (["email"] if r.name == "dns" and "--email-output" in r.argv else []):
+                failed[area] = info
     reports, history = portal.collect(list_runs(out_dir))
     hub = os.path.join(out_dir, "security_hub.html")
-    portal.build_hub(reports, hub, str(cfg.get("title") or ""), history, max_age)
-    summary = portal.posture(reports, history, max_age)
+    portal.build_hub(reports, hub, str(cfg.get("title") or ""), history, max_age, failed)
+    summary = portal.posture(reports, history, max_age, failed=failed)
     summary["run"] = {"id": stamp, "folder": run_dir, "max_parallel": parallel,
                       "modules": [{"module": r.name, "exit_code": r.code, "seconds": round(r.seconds, 1), "report": r.report,
                                    "log": r.log, "timed_out": r.timed_out, "error": r.error} for r in ordered]}

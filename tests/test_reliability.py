@@ -180,3 +180,29 @@ class ConcurrencyTest(TempDirTest):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FailedUpdateTest(TempDirTest):
+    def test_failed_module_is_flagged_not_hidden(self):
+        p = self.path("c.json")
+
+        def config(snapshot):
+            with open(p, "w") as f:
+                json.dump({"output_dir": "out", "modules": {"edr": {"options": {"from_json": snapshot}},
+                                                            "zta": {"input": fixture("ZeroTrustAssessmentReport.json")}}}, f)
+        config(fixture("s1_snapshot.json"))
+        with silenced():
+            orch.run(p)
+        config(self.path("missing.json"))          # e.g. credentials missing, API down: the module fails
+        with silenced() as (out, _):
+            orch.run(p)
+        with open(self.path("out", "posture.json"), encoding="utf-8") as f:
+            summary = json.load(f)
+        edr = next(a for a in summary["areas"] if a["area"] == "edr")
+        self.assertIn("cannot read", edr["last_run_failed"]["error"])
+        self.assertEqual(summary["overall"]["failed"], ["SentinelOne EDR"])
+        self.assertFalse(summary["overall"]["complete"])
+        self.assertNotIn("last_run_failed", next(a for a in summary["areas"] if a["area"] == "zta"))
+        self.assertIn("last update failed", out.getvalue())
+        with open(self.path("out", "security_hub.html"), encoding="utf-8") as f:
+            self.assertIn('"failed":{"edr":', f.read())
