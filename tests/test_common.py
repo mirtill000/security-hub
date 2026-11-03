@@ -24,6 +24,7 @@ class CommonTest(unittest.TestCase):
 
     def test_grade(self):
         self.assertEqual([grade(x) for x in (None, 95, 80, 65, 50, 49)], ["-", "A", "B", "C", "D", "F"])
+        self.assertEqual([grade(x) for x in (89, 76, 75, 74.9, 65)], ["B", "B", "B", "C", "C"])
 
     def test_rate_limiter_unlimited(self):
         r = RateLimiter(0)

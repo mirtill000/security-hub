@@ -2,7 +2,7 @@
 function noun(n) { const w = window.ASSET_NOUN || ['domain', 'domains']; return w[n === 1 ? 0 : 1]; }
 const st = s => ST[s] || ST.missing;
 const scoreCls = n => n >= 80 ? 'hi' : n >= 50 ? 'mid' : 'lo';
-const gradeOf = n => n >= 90 ? 'A' : n >= 80 ? 'B' : n >= 65 ? 'C' : n >= 50 ? 'D' : 'F';
+const gradeOf = n => n >= 90 ? 'A' : n >= 75 ? 'B' : n >= 65 ? 'C' : n >= 50 ? 'D' : 'F';
 const tierW = t => D.tiers[t] || 2;
 const vis = (r, c) => CHECKS.includes(c) && r._st(c) !== 'skipped';
 const icon = (n, s) => `<svg class="ico" width="${s || 16}" height="${s || 16}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n] || ''}</svg>`;

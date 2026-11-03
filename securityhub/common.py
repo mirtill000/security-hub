@@ -36,7 +36,7 @@ def grade(score: Optional[float]) -> str:
     """Letter grade used consistently by the reports and the portal."""
     if score is None:
         return "-"
-    return "A" if score >= 90 else "B" if score >= 80 else "C" if score >= 65 else "D" if score >= 50 else "F"
+    return "A" if score >= 90 else "B" if score >= 75 else "C" if score >= 65 else "D" if score >= 50 else "F"
 
 
 class RateLimiter:
