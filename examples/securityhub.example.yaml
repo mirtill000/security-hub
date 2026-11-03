@@ -81,6 +81,18 @@ modules:
       # threat_sla_days: 7               # open threats older than N days breach the SLA
       # from_json: s1_snapshot.json      # offline: analyze a saved snapshot instead of the API
 
+  # SAP Cloud Identity Services: users and groups (read-only SCIM 2.0)
+  # Credentials: export IAS_TENANT_URL=https://<tenant>.accounts.ondemand.com IAS_CLIENT_ID=... IAS_CLIENT_SECRET=...
+  # (a technical user with read-only authorizations; or client_cert / client_key). Never in this file.
+  ias:
+    enabled: false
+    options:
+      csv: true
+      # privileged_groups: [IAS Admins, BTP Global Admins]   # members must never have a local IAS password
+      # password_types: [partner, customer]                  # user types expected to use IAS passwords
+      # inactive_days: 90
+      # password_max_days: 365
+
   # Microsoft Zero Trust Assessment (run Invoke-ZtAssessment first, then point to its folder)
   zta:
     enabled: false

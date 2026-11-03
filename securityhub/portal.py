@@ -37,14 +37,14 @@ __version__ = "1.2.0"
 
 DATA_RE = re.compile(r'<script type="application/json" id="mg-data">(.*?)</script>', re.S)
 TITLE_RE = re.compile(r"<title>(.*?)</title>", re.S | re.I)
-TYPE_ORDER = {"email": 0, "dns": 1, "proofpoint": 2, "waf": 3, "edr": 4, "zta": 5, "other": 6}
-TYPE_LABEL = {"email": "Email security", "dns": "DNS security", "waf": "Imperva Cloud WAF", "edr": "SentinelOne EDR", "proofpoint": "Proofpoint",
+TYPE_ORDER = {"email": 0, "dns": 1, "proofpoint": 2, "waf": 3, "edr": 4, "ias": 5, "zta": 6, "other": 7}
+TYPE_LABEL = {"email": "Email security", "dns": "DNS security", "waf": "Imperva Cloud WAF", "edr": "SentinelOne EDR", "proofpoint": "Proofpoint", "ias": "SAP Cloud Identity",
               "zta": "Microsoft Zero Trust", "other": "Report"}
 DOMAIN_AREAS = ("email", "dns")  # reports whose rows are domains (MailGuard: one scan, two reports)
 TIER_W = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 # Data older than this (days) is flagged as stale: DNS and WAF can be assessed daily, the Zero Trust
 # Assessment is a periodic export. Override with --max-age / max_age_days in the configuration.
-MAX_AGE_DAYS = {"email": 2, "dns": 2, "proofpoint": 2, "waf": 2, "edr": 2, "zta": 35}
+MAX_AGE_DAYS = {"email": 2, "dns": 2, "proofpoint": 2, "waf": 2, "edr": 2, "ias": 2, "zta": 35}
 STATUS_RANK = {"bad": 0, "warn": 1, "good": 2}
 
 
@@ -63,6 +63,8 @@ def detect(payload: Optional[dict], title: str) -> str:
             return "edr"
         if (payload.get("meta") or {}).get("tool") == "PPGuard":
             return "proofpoint"
+        if (payload.get("meta") or {}).get("tool") == "IASGuard":
+            return "ias"
         if (payload.get("meta") or {}).get("tool") == "WAFGuard" or "account_issues" in payload:
             return "waf"
         if isinstance(payload.get("results"), list) and "checks" in payload:
@@ -85,7 +87,8 @@ def summarize_assets(kind: str, payload: dict) -> dict:
     measured = [r for r in rows if (inventory.dns_measured(r) if kind in DOMAIN_AREAS else inventory.waf_measured(r))]
     avg = weighted_avg(measured, tiers)
     sev = Counter(i.get("severity") for r in rows for i in r.get("issues") or [])
-    noun = "domains" if kind in DOMAIN_AREAS + ("proofpoint",) else "endpoints" if kind == "edr" else "websites"
+    noun = ("domains" if kind in DOMAIN_AREAS + ("proofpoint",) else "endpoints" if kind == "edr" else "users" if kind == "ias"
+            else "websites")
     kpis = [[len(rows), f"{noun} assessed"], *([[len(rows) - len(measured), "not verified (errors)", "warn"]] if len(measured) < len(rows) else []),
             [sum(r.get("overall_score", 0) >= 80 for r in rows), "well protected (80+)", "pass"],
             [sum(r.get("overall_score", 0) < 50 for r in measured), "at critical risk (under 50)", "fail"],
@@ -512,6 +515,57 @@ def exec_proofpoint(payload: dict) -> dict:
     return {"status": status, "kpis": kpis, "side": side,
             "trend": round(sum(deltas) / len(deltas), 1) if deltas else None, "actions": actions, "headline": head}
 
+
+def exec_ias(payload: dict) -> dict:
+    """Identity outcomes: users who can only sign in through the corporate IdP, privileged users with a local
+    password, inactive accounts. Figures come from the tenant totals (large directories list only users with findings)."""
+    rows = payload.get("results") or []
+    tot = payload.get("totals") or {}
+    codes = lambda r: {i.get("code") for i in r.get("issues") or []}
+    active = tot.get("active") or len(rows)
+    unexpected = tot.get("password_unexpected", 0)
+    priv = [r for r in rows if "PASSWORD_LOGIN_PRIVILEGED" in codes(r)]
+    nomfa = [r for r in rows if "PASSWORD_NO_MFA" in codes(r)]
+    expired = [r for r in rows if "EXPIRED_ACTIVE" in codes(r)]
+    inactive = [r for r in rows if codes(r) & {"INACTIVE", "NEVER_USED"}]
+    kpis = [_kpi("ias_corporate", "Users who sign in only as expected (no unexpected IAS password)",
+                 _pct(active - unexpected, active) if active else None, "%",
+                 f"{active - unexpected} of {active} active users", 100, area="ias", hash_="#/domains?profile=password"),
+            _kpi("ias_priv_pwd", "Privileged users with a local IAS password", len(priv), "",
+                 "members of the privileged groups", 0, higher_is_better=False, area="ias", hash_="#/domains?profile=privileged")]
+    if tot.get("last_login_visible"):
+        kpis.append(_kpi("ias_inactive", "Inactive or never used accounts", len(inactive), "",
+                         f"of {active} active users", 0, higher_is_better=False, area="ias", hash_="#/domains?profile=inactive"))
+    side = [["Local IAS password (not expected)", str(unexpected), "warn" if unexpected else "good"],
+            ["Privileged users with IAS password", str(len(priv)), "bad" if priv else "good"],
+            ["Expired but still active", str(len(expired)), "bad" if expired else "good"]]
+    if tot.get("mfa_visible"):
+        side.append(["IAS password without second factor", str(len(nomfa)), "bad" if nomfa else "good"])
+    if tot.get("last_login_visible"):
+        side.append(["Inactive or never used", str(len(inactive)), "warn" if inactive else "good"])
+    if tot.get("limited"):  # only the users with findings are listed: score from the share of clean users
+        score = _pct(active - (tot.get("with_findings") or 0), active) if active else None
+    else:
+        score = weighted_avg(rows, payload.get("tiers") or TIER_W)
+    deltas = [r["change"]["score_delta"] for r in rows if r.get("change") and r["change"].get("score_delta") is not None]
+    head = None
+    if priv:
+        head = (100, f"{len(priv)} privileged user{'s' if len(priv) != 1 else ''} can sign in to SAP with a local password")
+    elif unexpected:
+        head = (_pct(unexpected, active), f"{unexpected} of {active} SAP users can sign in without the corporate identity provider")
+    actions = _asset_actions("ias", payload, rows)
+    for i in payload.get("account_issues") or []:
+        if i.get("severity") in ("critical", "warning"):
+            actions.append({"area": "ias", "code": i.get("code"), "severity": i["severity"], "title": i.get("message"),
+                            "rec": i.get("recommendation"), "count": None, "share": None, "critical_tier": 0,
+                            "impact": 40 if i["severity"] == "critical" else 10, "hash": "#/policies"})
+    actions.sort(key=lambda a: (a["code"] != "PASSWORD_LOGIN_PRIVILEGED", -a["impact"], a["severity"] != "critical", str(a["code"])))
+    status = _status(score, bool(priv or expired or nomfa))
+    if priv and status != "unknown":
+        status = "bad"
+    return {"status": status, "kpis": kpis, "side": side,
+            "trend": round(sum(deltas) / len(deltas), 1) if deltas else None, "actions": actions, "headline": head}
+
 def exec_zta(payload: dict) -> dict:
     tests = payload.get("tests") or []
     info = payload.get("tenant_info")
@@ -593,6 +647,8 @@ def page_parts(kind: str) -> Tuple[str, str, str]:
         from .scanners.edr import report as m
     elif kind == "proofpoint":
         from .scanners.proofpoint import report as m
+    elif kind == "ias":
+        from .scanners.sap_ias import report as m
     elif kind == "zta":
         from .scanners import zero_trust as m
     else:
@@ -658,14 +714,14 @@ def load_report(path: str, idx: int, keep: bool = True) -> dict:
     if payload is not None:
         try:
             summary = (summarize_zta(payload) if kind == "zta" else
-                       summarize_assets(kind, payload) if kind in ("email", "dns", "waf", "edr", "proofpoint") else summary)
+                       summarize_assets(kind, payload) if kind in ("email", "dns", "waf", "edr", "proofpoint", "ias") else summary)
         except Exception as e:  # never fail the hub because of one report
             print(f"Warning: summary of {os.path.basename(path)} not available ({type(e).__name__}: {e})", file=sys.stderr)
     summary["exec"] = None
-    if payload is not None and kind in ("email", "dns", "waf", "edr", "proofpoint", "zta"):
+    if payload is not None and kind in ("email", "dns", "waf", "edr", "proofpoint", "ias", "zta"):
         try:
             summary["exec"] = {"email": exec_email, "dns": exec_dns, "waf": exec_waf, "edr": exec_edr, "proofpoint": exec_proofpoint,
-                               "zta": exec_zta}[kind](payload)
+                               "ias": exec_ias, "zta": exec_zta}[kind](payload)
         except Exception as e:
             print(f"Warning: executive metrics of {os.path.basename(path)} not available ({type(e).__name__}: {e})", file=sys.stderr)
     if not summary.get("generated"):

@@ -1,6 +1,6 @@
 # Security Hub
 
-Monitoraggio della **security posture** su più aree (e-mail, DNS, Proofpoint, WAF, EDR, Zero Trust), con un unico comando e un unico portale:
+Monitoraggio della **security posture** su più aree (e-mail, DNS, Proofpoint, WAF, EDR, identità SAP, Zero Trust), con un unico comando e un unico portale:
 
 | Area | Modulo | Cosa valuta | Sorgente dati |
 |------|--------|-------------|---------------|
@@ -9,6 +9,7 @@ Monitoraggio della **security posture** su più aree (e-mail, DNS, Proofpoint, W
 | **DNS** | `securityhub dns` (MailGuard) | DNSSEC, CAA, takeover delle dipendenze, scadenza registrazioni, zone transfer (AXFR, opt-in), coerenza resolver, lookalike | DNS live (+ RDAP) |
 | **Proofpoint** | `securityhub proofpoint` (PPGuard) | Posta che passa davvero da Proofpoint (MX, MX di bypass, consegna diretta a Microsoft 365, SPF) e, da TAP, minacce consegnate, click malevoli permessi, URL Defense, Very Attacked People e top clicker | DNS pubblico + API TAP (sola lettura) o snapshot JSON |
 | **EDR** | `securityhub edr` (EDRGuard) | SentinelOne: salute e versione degli agent, Protect vs Detect, anti-tamper, motori, snapshot, minacce aperte e SLA, esclusioni rischiose, copertura rispetto all'inventario | API SentinelOne v2.1 (sola lettura) o snapshot JSON |
+| **Identità SAP** | `securityhub sap-ias` (IASGuard) | SAP Cloud Identity Services: utenti con password IAS locale invece dell'IdP aziendale, privilegiati con password, MFA, igiene password, account inattivi, scaduti o con e-mail condivisa | SCIM 2.0 (sola lettura) o snapshot JSON |
 | **Zero Trust** | `securityhub zta` (ZTAGuard) | Risultati del Microsoft Zero Trust Assessment per pilastro, priorità, quick win | `ZeroTrustAssessmentReport.json` |
 | **Portale** | `securityhub portal` (GuardHub) | Un solo file HTML con stato per area, KPI, piano d'azione trasversale, **vista per asset**, trend storici e i report navigabili | Report HTML generati dai moduli |
 
@@ -333,6 +334,35 @@ quelli senza MX (non valutati). Le minacce su domini che non passano da Proofpoi
 Il service principal si crea in TAP > Settings > Connected Applications. La finestra `--hours` (default 24, max 168)
 conviene sia pari all'intervallo tra due run; le chiamate SIEM sono una per ora (24 al giorno con il default).
 
+## Identità SAP (Cloud Identity Services)
+
+`securityhub sap-ias` (alias `ias`, modulo `ias` nella configurazione) legge utenti e gruppi del tenant IAS con le
+API SCIM 2.0 **in sola lettura** e valuta ogni utente attivo.
+
+```bash
+export IAS_TENANT_URL=https://<tenant>.accounts.ondemand.com IAS_CLIENT_ID=... IAS_CLIENT_SECRET=...
+securityhub sap-ias --privileged-groups "IAS Admins" --password-types partner -o ias.html --json --csv
+securityhub sap-ias --save-raw ias.json      # snapshot senza telefoni, indirizzi o password
+```
+
+Credenziali: un'utenza tecnica dedicata con sole autorizzazioni di lettura (utenti e gruppi), con segreto
+(`IAS_CLIENT_SECRET` o `secret_file`) o certificato client (`client_cert` / `client_key`); mai nel file di
+configurazione (`client_secret` è rifiutato).
+
+| Controllo | Peso | Cosa verifica |
+|-----------|-----:|---------------|
+| `signin` | 40 | L'utente può entrare con una **password IAS locale**, cioè senza l'IdP aziendale (e senza la sua MFA). Critico per i membri di `--privileged-groups`; atteso per i tipi in `--password-types` (es. fornitori), di cui si valuta solo l'igiene |
+| `mfa` | 25 | Password locale senza secondo fattore, se il tenant espone l'informazione |
+| `password` | 15 | Password più vecchia di `--password-max-days` (365), password iniziale mai cambiata, policy Standard invece di Enterprise, molti tentativi falliti |
+| `activity` | 15 | Nessun accesso da `--inactive-days` (90) o mai usato, se il tenant espone l'ultimo accesso |
+| `lifecycle` | 5 | Validità scaduta ma account ancora attivo |
+| `email` | info | E-mail non verificata o condivisa da più account |
+
+Un dato che il tenant non espone (ultimo accesso, MFA) rende il controllo *non verificato*, non fallito, e la
+pagina **Directory** lo dichiara. Gli account disattivati sono contati ma non valutati. Sopra 5.000 utenti attivi
+il report elenca solo quelli con rilievi, mentre i totali coprono tutti. Nel portale l'area è *At risk* se un
+utente privilegiato ha una password IAS locale.
+
 ## SentinelOne EDR
 
 `securityhub edr` (alias `s1`, `sentinelone`) legge la console SentinelOne con le API v2.1 **in sola lettura** e
@@ -408,13 +438,14 @@ securityhub/
   ui/                  design system condiviso di report e portale (assemblato in file HTML singoli e offline)
     base.css             token, layout e componenti comuni a tutte le pagine
     core.js, theme.js, report-core.js, asset-report.js   funzioni condivise (tutte le pagine / i 3 report / DNS e WAF)
-    dns|waf|edr|proofpoint|zta|portal.css|js, report.html, portal.html   parti specifiche
+    dns|waf|edr|proofpoint|ias|zta|portal.css|js, report.html, portal.html   parti specifiche
   scanners/
     dns_email/         MailGuard DNS: constants, models, domains, dnsclient, rdap, fetch,
                        analyzer + checks_auth / checks_transport / checks_exposure / scoring,
                        lookalikes, dmarc_reports, remediation, baseline, inputs, exports, report, cli
     waf/               WAFGuard: constants, models, api, probe, checks, scoring, remediation, analysis, exports, report, cli
     proofpoint/        PPGuard (Proofpoint): constants, models, routing (DNS), api (TAP), checks, analysis, exports, report, cli
+    sap_ias/           IASGuard (SAP Cloud Identity): constants, models, api (SCIM), analysis, exports, report, cli
     edr/               EDRGuard (SentinelOne): constants, models, api, checks, analysis, exports, report, cli
     zero_trust.py      ZTAGuard (Microsoft)
 tests/                 test automatici (pytest) con fixture sintetiche e DNS simulato (tests/fakedns.py)
@@ -428,7 +459,7 @@ contenuto del file indicato.
 ## Note di sicurezza
 
 - Tutti i moduli sono **in sola lettura**: WAFGuard usa solo endpoint list/status/get, EDRGuard solo GET (token Viewer), PPGuard solo le API SIEM e People di TAP.
-- Le credenziali (Imperva, SentinelOne, Proofpoint) non sono accettate nel file di configurazione: variabili d'ambiente o file di chiave.
+- Le credenziali (Imperva, SentinelOne, Proofpoint, SAP IAS) non sono accettate nel file di configurazione: variabili d'ambiente o file di chiave.
 - I CSV sono protetti da formula injection; i dati inseriti nei report HTML sono escapati e le pagine hanno una CSP restrittiva.
 - Il fetch MTA-STS è protetto da SSRF (solo IP pubblici, salvo `--allow-private`).
 - `reports/`, snapshot e `securityhub.yaml` sono in `.gitignore`: descrivono la tua posture e non vanno pubblicati.

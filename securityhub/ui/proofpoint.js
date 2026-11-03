@@ -293,7 +293,7 @@ function domains() {
   </div>`;
   if (S.filtersOpen) h += filterPanel();
   h += `<div class="chips">${active.length ? active.map(([k, lbl]) => `<span class="chip">${esc(lbl)}<button data-chip="${esc(k)}" aria-label="Remove filter ${esc(lbl)}">${icon('x', 12)}</button></span>`).join('') + '<button class="link" data-action="clear">Clear all</button>' : `<span>${all.length} domains</span>`}</div>`;
-  if (S.sel.size) h += `<div class="selbar"><b>${S.sel.size} selected</b><button class="btn small" data-action="csv-sel">Export CSV</button><button class="btn small" data-action="copy-sel">Copy hostnames</button><span class="spacer"></span><button class="link" data-action="sel-clear">Clear selection</button></div>`;
+  if (S.sel.size) h += `<div class="selbar"><b>${S.sel.size} selected</b><button class="btn small" data-action="csv-sel">Export CSV</button><button class="btn small" data-action="copy-sel">Copy domains</button><span class="spacer"></span><button class="link" data-action="sel-clear">Clear selection</button></div>`;
   if (!all.length) h += `<div class="grid-wrap"><div class="empty"><b>No domain matches these filters</b><button class="btn" data-action="clear">Clear filters</button></div></div>`;
   else h += `<div class="grid-wrap" id="grid">${P.view === 'heatmap' ? heatmap(items) : table(items)}</div>`;
   return h + pager(all.length, pages);
@@ -569,8 +569,8 @@ document.addEventListener('click', e => {
     filters: () => { S.filtersOpen = !S.filtersOpen; render(); }, clear: () => filterTo({}),
     csv: () => { S.menu = null; exportCsv(list()); render(); }, json: () => { S.menu = null; exportJson(list()); render(); },
     'csv-sel': () => { S.menu = null; exportCsv(R.filter(r => S.sel.has(r._i)), 'edrguard-selected.csv'); render(); },
-    'copy-list': () => { S.menu = null; copyText(list().map(r => r.domain).join('\n'), `${list().length} hostnames copied`); render(); },
-    'copy-sel': () => copyText(R.filter(r => S.sel.has(r._i)).map(r => r.domain).join('\n'), `${S.sel.size} hostnames copied`),
+    'copy-list': () => { S.menu = null; copyText(list().map(r => r.domain).join('\n'), `${list().length} domains copied`); render(); },
+    'copy-sel': () => copyText(R.filter(r => S.sel.has(r._i)).map(r => r.domain).join('\n'), `${S.sel.size} domains copied`),
     'sel-clear': () => { S.sel.clear(); render(); }, 'cols-reset': () => { P.hidden = []; savePrefs(); render(); }
   };
   if (acts[a]) acts[a]();

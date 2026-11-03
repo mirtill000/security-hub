@@ -8,6 +8,7 @@
     securityhub waf      --account-id N [options] Imperva Cloud WAF posture (WAFGuard)
     securityhub edr      [options]                SentinelOne EDR posture (EDRGuard)
     securityhub proofpoint --domains F [options]  Proofpoint email protection: routing, TAP threats, clicks (PPGuard)
+    securityhub sap-ias  [options]                SAP Cloud Identity Services identities (IASGuard)
     securityhub zta      <report folder> [opts]   Microsoft Zero Trust Assessment (ZTAGuard)
     securityhub portal   <reports...> [options]   combine reports into one portal (GuardHub)
 
@@ -33,16 +34,17 @@ TOOLS = {
     "waf": ("securityhub.scanners.waf", "main", "Imperva Cloud WAF configuration assessment (WAFGuard)"),
     "edr": ("securityhub.scanners.edr", "main", "SentinelOne EDR posture: agents, policies, threats, exclusions (EDRGuard)"),
     "proofpoint": ("securityhub.scanners.proofpoint", "main", "Proofpoint email protection: MX routing, TAP threats, clicks, people (PPGuard)"),
+    "sap-ias": ("securityhub.scanners.sap_ias", "main", "SAP Cloud Identity Services: sign-in method, MFA, passwords, inactive accounts (IASGuard)"),
     "zta": ("securityhub.scanners.zero_trust", "main", "Microsoft Zero Trust Assessment report (ZTAGuard)"),
     "portal": ("securityhub.portal", "main", "Combine reports into one navigable portal (GuardHub)"),
 }
 ALIASES = {"mail": "email", "e-mail": "email", "zt": "zta", "zerotrust": "zta", "hub": "portal",
-           "sentinelone": "edr", "s1": "edr", "pp": "proofpoint", "tap": "proofpoint"}
+           "sentinelone": "edr", "s1": "edr", "pp": "proofpoint", "tap": "proofpoint", "ias": "sap-ias"}
 DEFAULT_CONFIG = "securityhub.yaml"
 
 
 def _usage() -> str:
-    lines = [f"Security Hub {__version__} - security posture monitoring for e-mail, DNS, WAF, EDR, Proofpoint and Zero Trust", "",
+    lines = [f"Security Hub {__version__} - security posture monitoring for e-mail, DNS, WAF, EDR, Proofpoint, SAP identity and Zero Trust", "",
              "usage: securityhub <command> [options]", "", "Commands:",
              "  run        Run the enabled modules from a configuration file, update the portal and posture.json",
              "  status     Print the current posture from an output folder or from reports",

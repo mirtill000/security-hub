@@ -42,6 +42,7 @@ MODULES: Dict[str, Tuple[str, Optional[str], str]] = {
     "proofpoint": ("securityhub.scanners.proofpoint", None, "Proofpoint email protection (PPGuard)"),
     "waf": ("securityhub.scanners.waf", None, "Imperva Cloud WAF (WAFGuard)"),
     "edr": ("securityhub.scanners.edr", None, "SentinelOne EDR (EDRGuard)"),
+    "ias": ("securityhub.scanners.sap_ias", None, "SAP Cloud Identity (IASGuard)"),
     "zta": ("securityhub.scanners.zero_trust", "input", "Microsoft Zero Trust (ZTAGuard)"),
 }
 ORDER = list(MODULES)
@@ -58,10 +59,11 @@ RESERVED = {"output", "version", "help"}
 # Secrets never belong in a configuration file: use the environment or a key file.
 FORBIDDEN = {"api_key": "use the IMPERVA_API_KEY environment variable or api_key_file",
              "api_token": "use the S1_API_TOKEN environment variable or api_token_file",
-             "secret": "use the PROOFPOINT_SECRET environment variable or secret_file"}
+             "secret": "use the PROOFPOINT_SECRET environment variable or secret_file",
+             "client_secret": "use the IAS_CLIENT_SECRET environment variable or secret_file"}
 # Option values that are paths: resolved relative to the configuration file.
 PATH_OPTIONS = {"input", "input_file", "metadata", "from_json", "save_raw", "api_key_file", "api_token_file", "inventory",
-                "domains", "secret_file", "cache_file",
+                "domains", "secret_file", "cache_file", "client_cert", "client_key",
                 "selectors_file",
                 "psl_file", "dmarc_reports", "baseline", "config"}
 
@@ -149,6 +151,18 @@ modules:
       # threat_sla_days: 7               # open threats older than N days breach the SLA
       # from_json: s1_snapshot.json      # offline: analyze a saved snapshot instead of the API
 
+  # SAP Cloud Identity Services: users and groups (read-only SCIM 2.0)
+  # Credentials: export IAS_TENANT_URL=https://<tenant>.accounts.ondemand.com IAS_CLIENT_ID=... IAS_CLIENT_SECRET=...
+  # (a technical user with read-only authorizations; or client_cert / client_key). Never in this file.
+  ias:
+    enabled: false
+    options:
+      csv: true
+      # privileged_groups: [IAS Admins, BTP Global Admins]   # members must never have a local IAS password
+      # password_types: [partner, customer]                  # user types expected to use IAS passwords
+      # inactive_days: 90
+      # password_max_days: 365
+
   # Microsoft Zero Trust Assessment (run Invoke-ZtAssessment first, then point to its folder)
   zta:
     enabled: false
@@ -196,7 +210,7 @@ def load_config(path: str) -> dict:
         raise ConfigError("the configuration must be a mapping")
     mods = cfg.get("modules") or {}
     if not isinstance(mods, dict):
-        raise ConfigError("'modules' must be a mapping of email / dns / proofpoint / waf / edr / zta")
+        raise ConfigError(f"'modules' must be a mapping of {' / '.join(MODULES)}")
     unknown = set(mods) - set(MODULES)
     if unknown:
         raise ConfigError(f"unknown module(s): {', '.join(sorted(unknown))} (available: {', '.join(ORDER)})")

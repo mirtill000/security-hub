@@ -129,7 +129,7 @@ class FreshnessTest(TempDirTest):
             self.assertEqual(cli.main(["status", self.path("zta.html"), "--max-age", "nope=1"]), EXIT_USAGE)
             cli.main(["portal", self.path("zta.html"), "-o", self.path("hub.html"), "--max-age", "zta=7"])
         with open(self.path("hub.html"), encoding="utf-8") as f:
-            self.assertIn('"max_age_days":{"email":2,"dns":2,"proofpoint":2,"waf":2,"edr":2,"zta":7.0}', f.read())
+            self.assertIn('"max_age_days":{"email":2,"dns":2,"proofpoint":2,"waf":2,"edr":2,"ias":2,"zta":7.0}', f.read())
 
 
 class ConcurrencyTest(TempDirTest):

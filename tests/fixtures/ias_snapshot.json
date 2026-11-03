@@ -1,0 +1,326 @@
+{
+ "tool": "IASGuard 1.0.0",
+ "vendor": "SAP",
+ "tenant": "https://contoso.accounts.ondemand.com",
+ "collected": "2026-11-01T06:00:00+00:00",
+ "users": [
+  {
+   "id": "id-1",
+   "userName": "anna.rossi@contoso.com",
+   "displayName": "Anna Rossi",
+   "userType": "employee",
+   "active": true,
+   "email": "anna.rossi@contoso.com",
+   "mailVerified": true,
+   "groups": [
+    "Utenti Interni Corporate"
+   ],
+   "created": "2025-01-10T08:00:00Z",
+   "lastModified": "2026-10-01T00:00:00Z",
+   "userId": "P000001",
+   "status": "active",
+   "validFrom": null,
+   "validTo": null,
+   "password": {
+    "status": "disabled",
+    "setTime": "2026-03-01T08:00:00Z",
+    "failedLoginAttempts": 0,
+    "policy": "https://accounts.sap.com/policy/passwords/sap/enterprise/1.0",
+    "locked": null
+   },
+   "lastLogin": "2026-10-30T09:00:00Z",
+   "mfa": null,
+   "custom": {}
+  },
+  {
+   "id": "id-2",
+   "userName": "admin.btp@contoso.com",
+   "displayName": "Admin Btp",
+   "userType": "employee",
+   "active": true,
+   "email": "admin.btp@contoso.com",
+   "mailVerified": true,
+   "groups": [
+    "IAS Admins",
+    "Utenti Interni Corporate"
+   ],
+   "created": "2025-01-10T08:00:00Z",
+   "lastModified": "2026-10-01T00:00:00Z",
+   "userId": "P000002",
+   "status": "active",
+   "validFrom": null,
+   "validTo": null,
+   "password": {
+    "status": "enabled",
+    "setTime": "2026-03-01T08:00:00Z",
+    "failedLoginAttempts": 0,
+    "policy": "https://accounts.sap.com/policy/passwords/sap/enterprise/1.0",
+    "locked": null
+   },
+   "lastLogin": "2026-10-29T09:00:00Z",
+   "mfa": false,
+   "custom": {}
+  },
+  {
+   "id": "id-3",
+   "userName": "marco.bianchi@contoso.com",
+   "displayName": "Marco Bianchi",
+   "userType": "employee",
+   "active": true,
+   "email": "marco.bianchi@contoso.com",
+   "mailVerified": true,
+   "groups": [
+    "Utenti Interni Corporate"
+   ],
+   "created": "2025-01-10T08:00:00Z",
+   "lastModified": "2026-10-01T00:00:00Z",
+   "userId": "P000003",
+   "status": "active",
+   "validFrom": null,
+   "validTo": null,
+   "password": {
+    "status": "enabled",
+    "setTime": "2024-06-01T00:00:00Z",
+    "failedLoginAttempts": 0,
+    "policy": "https://accounts.sap.com/policy/passwords/sap/web/1.1",
+    "locked": null
+   },
+   "lastLogin": "2026-10-20T09:00:00Z",
+   "mfa": true,
+   "custom": {}
+  },
+  {
+   "id": "id-4",
+   "userName": "old.user@contoso.com",
+   "displayName": "Old User",
+   "userType": "employee",
+   "active": true,
+   "email": "old.user@contoso.com",
+   "mailVerified": true,
+   "groups": [
+    "Utenti Interni Corporate"
+   ],
+   "created": "2025-01-10T08:00:00Z",
+   "lastModified": "2026-10-01T00:00:00Z",
+   "userId": "P000004",
+   "status": "active",
+   "validFrom": null,
+   "validTo": null,
+   "password": {
+    "status": "disabled",
+    "setTime": "2026-03-01T08:00:00Z",
+    "failedLoginAttempts": 0,
+    "policy": "https://accounts.sap.com/policy/passwords/sap/enterprise/1.0",
+    "locked": null
+   },
+   "lastLogin": "2026-03-01T09:00:00Z",
+   "mfa": null,
+   "custom": {}
+  },
+  {
+   "id": "id-5",
+   "userName": "never.used@contoso.com",
+   "displayName": "Never Used",
+   "userType": "employee",
+   "active": true,
+   "email": "never.used@contoso.com",
+   "mailVerified": true,
+   "groups": [],
+   "created": "2026-05-01T00:00:00Z",
+   "lastModified": "2026-10-01T00:00:00Z",
+   "userId": "P000005",
+   "status": "active",
+   "validFrom": null,
+   "validTo": null,
+   "password": {
+    "status": "disabled",
+    "setTime": "2026-03-01T08:00:00Z",
+    "failedLoginAttempts": 0,
+    "policy": "https://accounts.sap.com/policy/passwords/sap/enterprise/1.0",
+    "locked": null
+   },
+   "lastLogin": null,
+   "mfa": null,
+   "custom": {}
+  },
+  {
+   "id": "id-6",
+   "userName": "fornitore1@supplier.example",
+   "displayName": "Fornitore1",
+   "userType": "partner",
+   "active": true,
+   "email": "fornitore1@supplier.example",
+   "mailVerified": true,
+   "groups": [
+    "Fornitori"
+   ],
+   "created": "2025-01-10T08:00:00Z",
+   "lastModified": "2026-10-01T00:00:00Z",
+   "userId": "P000006",
+   "status": "active",
+   "validFrom": null,
+   "validTo": null,
+   "password": {
+    "status": "enabled",
+    "setTime": "2026-03-01T08:00:00Z",
+    "failedLoginAttempts": 0,
+    "policy": "https://accounts.sap.com/policy/passwords/sap/enterprise/1.0",
+    "locked": null
+   },
+   "lastLogin": "2026-10-25T09:00:00Z",
+   "mfa": false,
+   "custom": {
+    "customAttribute2": "ARIBA"
+   }
+  },
+  {
+   "id": "id-7",
+   "userName": "contractor@contoso.com",
+   "displayName": "Contractor",
+   "userType": "employee",
+   "active": true,
+   "email": "contractor@contoso.com",
+   "mailVerified": true,
+   "groups": [],
+   "created": "2025-01-10T08:00:00Z",
+   "lastModified": "2026-10-01T00:00:00Z",
+   "userId": "P000007",
+   "status": "active",
+   "validFrom": null,
+   "validTo": "2026-09-30T00:00:00Z",
+   "password": {
+    "status": "disabled",
+    "setTime": "2026-03-01T08:00:00Z",
+    "failedLoginAttempts": 0,
+    "policy": "https://accounts.sap.com/policy/passwords/sap/enterprise/1.0",
+    "locked": null
+   },
+   "lastLogin": "2026-10-31T09:00:00Z",
+   "mfa": null,
+   "custom": {}
+  },
+  {
+   "id": "id-8",
+   "userName": "shared1@contoso.com",
+   "displayName": "Shared1",
+   "userType": "employee",
+   "active": true,
+   "email": "helpdesk@contoso.com",
+   "mailVerified": false,
+   "groups": [],
+   "created": "2026-01-01T00:00:00Z",
+   "lastModified": "2026-10-01T00:00:00Z",
+   "userId": "P000008",
+   "status": "active",
+   "validFrom": null,
+   "validTo": null,
+   "password": {
+    "status": "initial",
+    "setTime": "2026-03-01T08:00:00Z",
+    "failedLoginAttempts": 0,
+    "policy": "https://accounts.sap.com/policy/passwords/sap/enterprise/1.0",
+    "locked": null
+   },
+   "lastLogin": null,
+   "mfa": null,
+   "custom": {}
+  },
+  {
+   "id": "id-9",
+   "userName": "shared2@contoso.com",
+   "displayName": "Shared2",
+   "userType": "employee",
+   "active": true,
+   "email": "helpdesk@contoso.com",
+   "mailVerified": true,
+   "groups": [],
+   "created": "2025-01-10T08:00:00Z",
+   "lastModified": "2026-10-01T00:00:00Z",
+   "userId": "P000009",
+   "status": "active",
+   "validFrom": null,
+   "validTo": null,
+   "password": {
+    "status": "disabled",
+    "setTime": "2026-03-01T08:00:00Z",
+    "failedLoginAttempts": 0,
+    "policy": "https://accounts.sap.com/policy/passwords/sap/enterprise/1.0",
+    "locked": null
+   },
+   "lastLogin": "2026-10-31T09:00:00Z",
+   "mfa": null,
+   "custom": {}
+  },
+  {
+   "id": "id-10",
+   "userName": "left.company@contoso.com",
+   "displayName": "Left Company",
+   "userType": "employee",
+   "active": false,
+   "email": "left.company@contoso.com",
+   "mailVerified": true,
+   "groups": [],
+   "created": "2025-01-10T08:00:00Z",
+   "lastModified": "2026-10-01T00:00:00Z",
+   "userId": "P000010",
+   "status": "active",
+   "validFrom": null,
+   "validTo": null,
+   "password": {
+    "status": "disabled",
+    "setTime": "2026-03-01T08:00:00Z",
+    "failedLoginAttempts": 0,
+    "policy": "https://accounts.sap.com/policy/passwords/sap/enterprise/1.0",
+    "locked": null
+   },
+   "lastLogin": null,
+   "mfa": null,
+   "custom": {}
+  },
+  {
+   "id": "id-11",
+   "userName": "attack.target@contoso.com",
+   "displayName": "Attack Target",
+   "userType": "employee",
+   "active": true,
+   "email": "attack.target@contoso.com",
+   "mailVerified": true,
+   "groups": [],
+   "created": "2025-01-10T08:00:00Z",
+   "lastModified": "2026-10-01T00:00:00Z",
+   "userId": "P000011",
+   "status": "active",
+   "validFrom": null,
+   "validTo": null,
+   "password": {
+    "status": "enabled",
+    "setTime": "2026-03-01T08:00:00Z",
+    "failedLoginAttempts": 9,
+    "policy": "https://accounts.sap.com/policy/passwords/sap/enterprise/1.0",
+    "locked": null
+   },
+   "lastLogin": "2026-10-31T07:00:00Z",
+   "mfa": true,
+   "custom": {}
+  }
+ ],
+ "groups": [
+  {
+   "id": "g1",
+   "displayName": "IAS Admins"
+  },
+  {
+   "id": "g2",
+   "displayName": "Utenti Interni Corporate"
+  },
+  {
+   "id": "g3",
+   "displayName": "Fornitori"
+  }
+ ],
+ "errors": [],
+ "fields_seen": {
+  "lastLogin": 8,
+  "mfa": 4
+ }
+}
