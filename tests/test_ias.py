@@ -4,6 +4,7 @@ import io
 import json
 import os
 import urllib.error
+import urllib.parse
 from unittest import mock
 
 from securityhub import cli, orchestrator as orch, portal
@@ -128,3 +129,34 @@ class CliPortalTest(TempDirTest):
             json.dump({"modules": {"ias": {"options": {"client_secret": "x"}}}}, f)
         with self.assertRaises(orch.ConfigError):
             orch.run(p, dry_run=True)
+
+
+class ReadOnlyTest(TempDirTest):
+    def test_only_get_without_body_on_read_endpoints(self):
+        seen = []
+
+        def record(req, timeout, context):
+            seen.append((req.get_method(), urllib.parse.urlsplit(req.full_url).path, req.data))
+            body = {"Resources": [{"id": "1", "userName": "a"}], "nextId": "end"}
+            return FakeResponse(json.dumps(body).encode())
+        api = iasapi.IASClient("t.accounts.ondemand.com", "id", "secret", qps=0)
+        with mock.patch.object(iasapi.urllib.request, "urlopen", record):
+            iasapi.collect(api, lambda m: None)
+        self.assertTrue(seen)
+        self.assertEqual({m for m, _, _ in seen}, {"GET"})
+        self.assertEqual({p for _, p, _ in seen}, {"/scim/Users", "/scim/Groups"})
+        self.assertEqual({d for _, _, d in seen}, {None})
+        for path in ("/scim/Users/123", "/service/scim/Users", "/service/users/statusPassword/new", "/scim/Groups/1"):
+            with self.assertRaises(ValueError):
+                api.get(path)
+
+    def test_no_write_capable_code(self):
+        import inspect
+        import re
+        from securityhub.scanners import sap_ias as pkg
+        for mod in ("api", "analysis", "cli", "report", "exports", "models", "constants"):
+            src = inspect.getsource(__import__(f"{pkg.__name__}.{mod}", fromlist=[mod]))
+            self.assertIsNone(re.search(r"method\s*=\s*['\"](?!GET)", src), mod)
+            self.assertIsNone(re.search(r"\b(POST|PUT|PATCH|DELETE)\b", src), mod)
+            self.assertNotIn("data=", src.replace("payload", ""), mod)
+        self.assertEqual(inspect.getsource(iasapi).count("urlopen("), 1)

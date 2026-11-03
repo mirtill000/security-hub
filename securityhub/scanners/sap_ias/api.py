@@ -21,6 +21,8 @@ from ...common import RateLimiter
 from .constants import CUSTOM_EXT, LAST_LOGIN_KEYS, MFA_KEYS, SAP_EXT, USER_AGENT, __version__
 
 PAGE = 100
+# Read-only by construction: the client sends only GET, without a body, and only to these endpoints.
+READ_ONLY_PATHS = ("/scim/Users", "/scim/Groups")
 
 
 class APIError(Exception):
@@ -49,13 +51,15 @@ class IASClient:
         self.stats = {"requests": 0, "retries": 0, "errors": 0}
 
     def get(self, path: str, **params: Any) -> dict:
+        if path not in READ_ONLY_PATHS:
+            raise ValueError(f"refused: {path} is not a read-only endpoint of this tool")
         q = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
         url = f"{self.base}{path}" + (f"?{q}" if q else "")
         for attempt in range(4):
             self.rate.wait()
             self.stats["requests"] += 1
             try:
-                req = urllib.request.Request(url, headers=self.headers)
+                req = urllib.request.Request(url, headers=self.headers, method="GET")
                 with urllib.request.urlopen(req, timeout=self.timeout, context=self.ctx) as resp:
                     body = resp.read().decode("utf-8")
                     return json.loads(body) if body.strip() else {}
