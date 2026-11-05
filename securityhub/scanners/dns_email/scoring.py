@@ -27,7 +27,7 @@ class Scoring:
         pts: Dict[str, float] = {}
 
         spf = r.spf
-        pts["spf"] = 0.0
+        pts["spf"] = 25.0 if parked and spf.status == "na" else 0.0  # no MX and no SPF: not penalized
         if spf.status in ("valid", "warning") and not spf.permerror:
             pts["spf"] = {"-all": 25, "~all": 20}.get(spf.mechanism or "", 8) - (4 if spf.lookups >= 8 else 0)
 

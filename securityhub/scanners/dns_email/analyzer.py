@@ -207,7 +207,9 @@ class EmailSecurityAnalyzer(AuthChecks, TransportChecks, DNSHygieneChecks, Expos
         # MX is always collected (decides the mail / non-mail profile);
         # MX host resolution only when the MX or takeover check is selected.
         result.mx = timed("mx", self._analyze_mx, domain, bool({"mx", "takeover"} & sel))
-        if result.mx.null_mx or (result.mx.status == "missing" and not result.mx.implicit):
+        # No MX at all (even with an A record, the implicit-MX fallback) or a Null MX: the domain is treated as
+        # not handling mail - SPF and DKIM are then not applicable (their absence is not a finding)
+        if result.mx.null_mx or result.mx.status == "missing":
             result.profile = "non-mail"
         mail_enabled = result.profile == "mail"
 
@@ -219,7 +221,7 @@ class EmailSecurityAnalyzer(AuthChecks, TransportChecks, DNSHygieneChecks, Expos
             pending[check] = self._check_pool.submit(timed, check, fn, *args)
 
         if "spf" in run:
-            submit("spf", self._analyze_spf, domain)
+            submit("spf", self._analyze_spf, domain, mail_enabled)
         if "dmarc" in run:
             submit("dmarc", self._analyze_dmarc, domain)
         if "mta-sts" in run:

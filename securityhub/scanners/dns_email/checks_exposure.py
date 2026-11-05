@@ -352,8 +352,9 @@ class ExposureChecks:
         no_dkim = r.dkim.status in ("missing", "error")
 
         if r.profile == "non-mail":
-            if "spf" in on and r.spf.status != "dns_error" and (
-                    r.spf.record is None or not re.fullmatch(r"v=spf1\s+-all", r.spf.record.strip(), re.I)):
+            # a record that is present but not strict is still flagged; no record at all is not
+            if "spf" in on and r.spf.status != "dns_error" and r.spf.record is not None and \
+                    not re.fullmatch(r"v=spf1\s+-all", r.spf.record.strip(), re.I):
                 issues.append(make_issue("SPF_PARKED_NOT_STRICT"))
             if "dmarc" in on and r.dmarc.status != "dns_error" and r.dmarc.policy != "reject":
                 issues.append(make_issue("DMARC_PARKED_NOT_REJECT"))

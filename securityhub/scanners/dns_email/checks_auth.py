@@ -244,7 +244,7 @@ class AuthChecks:
                 ev.all_q = sub.all_q
         return ev
 
-    def _analyze_spf(self, domain: str) -> SPFResult:
+    def _analyze_spf(self, domain: str, mail_enabled: bool = True) -> SPFResult:
         result = SPFResult()
         status, recs, err = self._fetch_spf(domain)
 
@@ -253,6 +253,9 @@ class AuthChecks:
             result.issues.append(make_issue("SPF_DNS_ERROR", err))
             return result
         if status != "ok":
+            if not mail_enabled:  # no MX: no SPF is not a finding
+                result.status = "na"
+                return result
             result.status = "missing"
             result.issues.append(make_issue("SPF_MISSING"))
             return result
