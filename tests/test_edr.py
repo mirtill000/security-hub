@@ -43,6 +43,11 @@ class AnalysisTest(TempDirTest):
         self.assertTrue(eng and all(i.code != "ENGINE_OFF" for i in eng))            # one finding per named engine
         self.assertTrue(all(i.message.startswith("Detection engine disabled: ") for i in eng))
         self.assertTrue(all("(policy: group Lab)" in i.message for i in eng), [i.message for i in eng])
+        # only the documented detection engines: applicationControl / remoteShell off are not "disabled engines"
+        self.assertFalse([i for i in r["ws-milano-01"].issues if i.code.startswith("ENGINE_OFF")])
+        self.assertEqual(r["ws-milano-01"].checks["policy"].data["other_settings"],
+                         {"Application Control (containers only)": "off", "Remote Shell": "off"})
+        self.assertEqual(r["ws-milano-01"].checks["policy"].data["inherited_from"], "global")
         self.assertEqual(r["srv-web-02"].checks["policy"].data["scope"], "group Lab")   # group does not inherit
         self.assertEqual(r["ws-milano-01"].checks["policy"].data["scope"], "site EMEA")
         self.assertIn("AGENT_VERY_OLD", codes("ws-milano-02"))

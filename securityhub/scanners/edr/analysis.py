@@ -212,8 +212,8 @@ def analyze_snapshot(snap: dict, checks: List[str], metadata: Dict[str, dict], i
     for pid, p in policies.items():
         kind, _, ident = pid.partition(":")
         name = site_names.get(ident) if kind == "site" else (groups.get(ident) or {}).get("name")
-        off = [ENGINES.get(k, k) for k, v in (p.get("engines") or {}).items() if str(v).lower() == "off"]
-        row = {"id": pid, "name": name or ident, "type": kind, "mode": p.get("mitigationMode"),
+        off = [ENGINES[k] for k in ENGINES if str((p.get("engines") or {}).get(k, "")).strip().lower() == "off"]
+        row = {"id": pid, "name": name or ident, "type": kind, "inherited_from": p.get("inheritedFrom"), "mode": p.get("mitigationMode"),
                "suspicious_mode": p.get("mitigationModeSuspicious"), "anti_tamper": p.get("antiTamperingOn"),
                "snapshots": p.get("snapshotsOn"), "engines_off": off, "auto_mitigation": p.get("autoMitigationAction"),
                "in_scan": usage.get(pid, 0)}

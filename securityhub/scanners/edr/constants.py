@@ -103,10 +103,19 @@ TIER_ALIASES = {"crit": "critical", "critico": "critical", "alta": "high", "alto
                 "medio": "medium", "bassa": "low", "basso": "low", "1": "critical", "2": "high", "3": "medium", "4": "low"}
 
 # Policy engines: key -> label. Engines turned "off" in the effective policy are findings.
-ENGINES = {"reputation": "Reputation", "preExecution": "Static AI", "preExecutionSuspicious": "Static AI (suspicious)",
-           "executables": "Behavioral AI - executables", "dataFiles": "Documents and scripts", "exploits": "Exploits",
-           "lateralMovement": "Lateral movement", "penetration": "Behavioral AI - fileless", "pup": "Potentially unwanted apps"}
-OPTIONAL_ENGINES = {"pup"}  # off is a choice, reported as info
+# Detection engines of the policy ('engines' of GET /sites|groups/{id}/policy), with their console names. The nine
+# keys are the ones the Management API documents as detection engines ("penetration", "dataFiles", "exploits",
+# "reputation", "executables", "preExecutionSuspicious", "preExecution", "lateralMovement", "pup"); values are
+# "on" / "off". Other keys of the same object (applicationControl - containers only -, remoteShell, newer modules)
+# are not detection engines: they are shown but never reported as a disabled engine (remoteShell off is the safe value).
+ENGINES = {"reputation": "Reputation", "preExecution": "Static AI", "preExecutionSuspicious": "Static AI - Suspicious",
+           "executables": "Behavioral AI - Executables", "dataFiles": "Documents, Scripts",
+           "exploits": "Anti Exploitation / Fileless", "lateralMovement": "Lateral Movement",
+           "penetration": "Detect Interactive Threat", "pup": "Potentially Unwanted Applications"}
+OTHER_POLICY_SWITCHES = {"applicationControl": "Application Control (containers only)", "remoteShell": "Remote Shell"}
+# Off is a legitimate choice, reported as info: potentially unwanted applications, and Detect Interactive Threat
+# (off in the default Global policy).
+OPTIONAL_ENGINES = {"pup", "penetration"}
 
 # One finding per detection engine, so the engine that is off is named everywhere (findings list, counts, portal
 # actions), not only in the detail of each endpoint. ENGINE_OFF stays for engines this catalogue does not know.

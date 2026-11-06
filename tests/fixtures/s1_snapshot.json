@@ -57,8 +57,11 @@
     "exploits": "on",
     "lateralMovement": "on",
     "penetration": "on",
-    "pup": "on"
-   }
+    "pup": "on",
+    "applicationControl": "off",
+    "remoteShell": "off"
+   },
+   "inheritedFrom": "global"
   },
   "site:s2": {
    "mitigationMode": "protect",
@@ -75,8 +78,11 @@
     "exploits": "on",
     "lateralMovement": "on",
     "penetration": "on",
-    "pup": "on"
-   }
+    "pup": "on",
+    "applicationControl": "off",
+    "remoteShell": "off"
+   },
+   "inheritedFrom": "global"
   },
   "group:g3": {
    "mitigationMode": "detect",
@@ -93,7 +99,9 @@
     "exploits": "off",
     "lateralMovement": "off",
     "penetration": "on",
-    "pup": "off"
+    "pup": "off",
+    "applicationControl": "off",
+    "remoteShell": "off"
    }
   }
  },

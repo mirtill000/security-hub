@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
-from .constants import ENGINE_FINDING, ENGINES, EXECUTABLE_TYPES, MITIGATED, OPTIONAL_ENGINES
+from .constants import ENGINE_FINDING, ENGINES, OTHER_POLICY_SWITCHES, EXECUTABLE_TYPES, MITIGATED, OPTIONAL_ENGINES
 from .models import CheckResult, make_issue
 
 
@@ -84,25 +84,27 @@ def check_policy(a: dict, policy: Optional[dict], scope: Optional[str]) -> Check
         c.data = {"scope": scope}
         return c
     engines = policy.get("engines") or {}
-    off = [k for k, v in engines.items() if str(v).lower() == "off"]
+    # only the documented detection engines can be "disabled engines"; any other key is reported as it is, no finding
+    off = [k for k in ENGINES if str(engines.get(k, "")).strip().lower() == "off"]
+    inherited = policy.get("inheritedFrom")   # account / global / site: where the effective values come from
+    where = f"{scope}, inherited from {inherited}" if scope and inherited and not scope.startswith(str(inherited)) else scope
     tamper = policy.get("antiTamperingOn")
     snapshots = policy.get("snapshotsOn")
     action = str(policy.get("autoMitigationAction") or "")
     c.data = {"scope": scope, "anti_tamper": tamper, "snapshots": snapshots, "auto_mitigation": action or None,
-              "mode": policy.get("mitigationMode"), "engines": {ENGINES.get(k, k): v for k, v in engines.items()},
-              "engines_off": [ENGINES.get(k, k) for k in off]}
+              "mode": policy.get("mitigationMode"), "inherited_from": inherited,
+              "engines": {ENGINES[k]: engines[k] for k in ENGINES if k in engines},
+              "other_settings": {OTHER_POLICY_SWITCHES.get(k, k): v for k, v in engines.items() if k not in ENGINES},
+              "engines_off": [ENGINES[k] for k in off]}
     got = 25.0
     if tamper is False:
         c.issues.append(make_issue("ANTI_TAMPER_OFF"))
         got -= 12
     for k in off:   # one finding per engine: the engine is named in the finding title
-        if k in ENGINE_FINDING:
-            issue = make_issue(ENGINE_FINDING[k])
-            if scope:
-                issue.message += f" (policy: {scope})"
-            c.issues.append(issue)
-        else:
-            c.issues.append(make_issue("ENGINE_OFF", k))
+        issue = make_issue(ENGINE_FINDING[k])
+        if where:
+            issue.message += f" (policy: {where})"
+        c.issues.append(issue)
     required_off = [k for k in off if k not in OPTIONAL_ENGINES]
     if required_off:
         got -= min(8, 3 * len(required_off))
