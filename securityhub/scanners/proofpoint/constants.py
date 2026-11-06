@@ -107,7 +107,9 @@ FINDINGS: Dict[str, Tuple[str, str, str, str]] = {
 }
 SEVERITY_RANK = {"critical": 0, "warning": 1, "info": 2}
 
-CHECKS: Dict[str, int] = {"routing": 40, "direct": 10, "spf": 5, "threats": 25, "clicks": 20, "rewrite": 0, "people": 0}
+# Mail routing is informational (which MX hosts are Proofpoint): not scored. The score measures what Proofpoint
+# protects: direct delivery that skips it, SPF for its outbound relay, threats that reached users, clicks allowed.
+CHECKS: Dict[str, int] = {"routing": 0, "direct": 20, "spf": 10, "threats": 40, "clicks": 30, "rewrite": 0, "people": 0}
 DNS_CHECKS = ("routing", "direct", "spf")
 TAP_CHECKS = ("threats", "clicks", "rewrite", "people")
 CHECK_LABELS = {"routing": "Mail routing", "direct": "Direct delivery", "spf": "SPF", "threats": "Delivered threats",

@@ -73,6 +73,9 @@ def check_spf(dns: Optional[dict]) -> CheckResult:
         return _finish(c, "spf")
     spf = dns.get("spf") or ""
     c.data = {"record": spf, "proofpoint": dns.get("spf_proofpoint")}
+    if not any(m.get("proofpoint") for m in dns.get("mx") or []):
+        c.status = "na"   # the domain does not use Proofpoint: its SPF belongs to the e-mail assessment
+        return _finish(c, "spf")
     if not spf:
         c.issues.append(make_issue("SPF_MISSING"))
     elif spf.split()[1:] in (["-all"], ["~all"]):

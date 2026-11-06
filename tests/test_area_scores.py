@@ -1,0 +1,47 @@
+"""Area score, grade and status tell the same story in the portal and posture.json."""
+
+import unittest
+
+from securityhub import portal
+from securityhub.common import grade
+
+
+def row(score, mx=1, **k):
+    return {"domain": f"d{score}-{mx}", "overall_score": score, "tier": "medium", "profile": "protected", "issues": [],
+            "score_breakdown": {"max": mx}, **k}
+
+
+class AreaScoreTest(unittest.TestCase):
+    def test_bands_follow_the_grades(self):
+        for score, st in ((90, "good"), (77, "good"), (75, "good"), (74, "warn"), (50, "warn"), (49, "bad")):
+            self.assertEqual(portal._status(score, False), st, score)
+        self.assertEqual(grade(77), "B")
+        self.assertEqual(portal._status(99, True), "warn")             # a critical exposure is never "good"
+
+    def test_rows_with_nothing_measurable_are_not_counted(self):
+        # e.g. Proofpoint: mail domains whose mail Proofpoint does not filter have no measurable control
+        payload = {"results": [row(40)] + [row(100, mx=0) for _ in range(50)]}
+        self.assertEqual(portal.area_score("proofpoint", payload), 40)
+        self.assertEqual(portal.summarize_assets("proofpoint", payload)["score"], 40)
+
+    def test_score_is_brought_into_the_band_of_the_status(self):
+        s = {"score": 99, "exec": {"status": "warn", "headline": [None, "2 malicious messages reached users"], "actions": []}}
+        portal._align_score(s)
+        self.assertEqual((s["score"], grade(s["score"]), s["score_uncapped"]), (74, "C", 99))
+        self.assertIn("2 malicious messages reached users", s["score_cap"])
+        s = {"score": 66, "exec": {"status": "bad", "headline": None,
+                                   "actions": [{"severity": "critical", "title": "1 PRA administrator without MFA"}]}}
+        portal._align_score(s)
+        self.assertEqual((s["score"], grade(s["score"])), (49, "F"))
+        ok = {"score": 77, "exec": {"status": "good"}}
+        portal._align_score(ok)
+        self.assertEqual((ok["score"], grade(ok["score"])), (77, "B"))                         # nothing to align
+        self.assertNotIn("score_cap", ok)
+
+    def test_status_and_card_use_the_same_score(self):
+        payload = {"results": [row(80), row(70)], "totals": {}}
+        self.assertEqual(portal.exec_pra(payload)["status"], portal._status(portal.area_score("pra", payload), False))
+
+
+if __name__ == "__main__":
+    unittest.main()

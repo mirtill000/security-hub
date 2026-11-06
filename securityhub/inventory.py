@@ -343,7 +343,7 @@ def build(reports: List[dict], now: Optional[datetime] = None) -> dict:
         sev = {s["severity"] for s in a["signals"]}
         incomplete = any(s["code"] == "DATA_INCOMPLETE" for s in a["signals"])
         a["status"] = ("bad" if "critical" in sev or (a["score"] is not None and a["score"] < 50) else
-                       "warn" if "warning" in sev or (a["score"] is not None and a["score"] < 80) else
+                       "warn" if "warning" in sev or (a["score"] is not None and a["score"] < 75) else
                        "good" if a["score"] is not None and not incomplete else "unknown")  # never "on track" on partial data
         a["mail_score"] = min((m["score"] for m in a["mail"] if m["score"] is not None), default=None)
         a["coverage_gap"] = any(s["code"] in ("DNS_NOT_MONITORED", "MAIL_NOT_IN_PROOFPOINT") for s in a["signals"])

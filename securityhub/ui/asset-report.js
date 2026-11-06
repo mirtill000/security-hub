@@ -1,7 +1,7 @@
 /* Asset noun of the report: an app sets window.ASSET_NOUN (default: domain / domains). */
 function noun(n) { const w = window.ASSET_NOUN || ['domain', 'domains']; return w[n === 1 ? 0 : 1]; }
 const st = s => ST[s] || ST.missing;
-const scoreCls = n => n >= 80 ? 'hi' : n >= 50 ? 'mid' : 'lo';
+const scoreCls = n => n >= 75 ? 'hi' : n >= 50 ? 'mid' : 'lo';
 const gradeOf = n => n >= 90 ? 'A' : n >= 75 ? 'B' : n >= 65 ? 'C' : n >= 50 ? 'D' : 'F';
 const tierW = t => D.tiers[t] || 2;
 const vis = (r, c) => CHECKS.includes(c) && r._st(c) !== 'skipped';
@@ -101,7 +101,7 @@ function filterPanel() {
   const compOpts = Object.keys(COMP).flatMap(k => ['fail', 'pass'].map(v => `${k}:${v}`)).filter(o => { const [k, v] = o.split(':'); return R.some(r => (r.compliance || {})[k] === v); });
   return `<div class="filter-panel">
     ${CHECKS.map(c => `<label class="field">${esc(L[c])}<select data-f="${c}"><option value="">All</option>${uniq(R.map(r => r._st(c))).map(v => `<option value="${esc(v)}"${S.f[c] === v ? ' selected' : ''}>${esc(st(v)[2])}</option>`).join('')}</select></label>`).join('')}
-    ${sel('score', 'Score band', ['hi', 'mid', 'lo'], S.score, v => ({hi: '80 and above', mid: '50 to 79', lo: 'Under 50'})[v])}
+    ${sel('score', 'Score band', ['hi', 'mid', 'lo'], S.score, v => ({hi: '75 and above', mid: '50 to 74', lo: 'Under 50'})[v])}
     <label class="field">Score range<span class="range"><input type="number" min="0" max="100" data-k="smin" value="${esc(S.smin)}" placeholder="0" aria-label="Minimum score"><span>to</span><input type="number" min="0" max="100" data-k="smax" value="${esc(S.smax)}" placeholder="100" aria-label="Maximum score"></span></label>
     ${tiers.length > 1 ? sel('tier', 'Tier', tiers, S.tier) : ''}${owners.length ? sel('owner', 'Owner', owners, S.owner) : ''}
     ${bus.length ? sel('bu', 'Business unit', bus, S.bu) : ''}${tags.length ? sel('tag', 'Tag', tags, S.tag) : ''}

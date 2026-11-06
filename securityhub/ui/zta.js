@@ -8,7 +8,7 @@ const T = D.tests, M = D.meta || {}, TEN = D.tenant || {}, diff = D.diff;
 const ESC = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'};
 const $ = (s, r) => (r || document).querySelector(s);
 const uniq = a => [...new Set(a.filter(Boolean))].sort();
-const scoreCls = n => n === null || n === undefined ? '' : n >= 80 ? 'hi' : n >= 50 ? 'mid' : 'lo';
+const scoreCls = n => n === null || n === undefined ? '' : n >= 75 ? 'hi' : n >= 50 ? 'mid' : 'lo';
 const gradeOf = n => n === null || n === undefined ? '-' : n >= 90 ? 'A' : n >= 75 ? 'B' : n >= 65 ? 'C' : n >= 50 ? 'D' : 'F';
 const ST = {passed: ['pass', '\u2713', 'Passed'], failed: ['fail', '\u2715', 'Failed'], investigate: ['warn', '?', 'Investigate'],
   skipped: ['na', '\u00B7', 'Skipped'], planned: ['none', '\u2013', 'Planned'], error: ['dns', '!', 'Error'], other: ['none', '\u2013', 'Other']};

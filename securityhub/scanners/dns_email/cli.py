@@ -43,7 +43,7 @@ class Progress:
 
     def update(self, r: DomainResult) -> None:
         self.done += 1
-        key = "err" if r.error or r.profile == "unreachable" else "ok" if r.overall_score >= 80 else \
+        key = "err" if r.error or r.profile == "unreachable" else "ok" if r.overall_score >= 75 else \
             "warn" if r.overall_score >= 50 else "crit"
         self.counts[key] += 1
         if self.quiet:
@@ -421,8 +421,8 @@ def main(argv: Optional[List[str]] = None, command: str = "dns") -> int:
     for view, vres, diff in written:
         name = {"email": "E-MAIL", "dns": "DNS", None: "E-MAIL AND DNS"}[view]
         print(f"\n{name}")
-        print(f"  Fully protected (>=80):   {sum(1 for r in vres if r.overall_score >= 80)}")
-        print(f"  Needs attention (50-79):  {sum(1 for r in vres if 50 <= r.overall_score < 80)}")
+        print(f"  Fully protected (>=75):   {sum(1 for r in vres if r.overall_score >= 75)}")
+        print(f"  Needs attention (50-74):  {sum(1 for r in vres if 50 <= r.overall_score < 75)}")
         print(f"  Critical risk (<50):      {sum(1 for r in vres if r.overall_score < 50)}")
         if diff:
             print(f"  Since baseline:           {diff['improved']} improved, {diff['worsened']} worsened, "

@@ -68,7 +68,7 @@ function matches(r) {
       || (r.tags || []).some(t => t.toLowerCase().includes(q)))) return false;
   for (const c of CHECKS) if (S.f[c] && r._st(c) !== S.f[c]) return false;
   const sc = r.overall_score;
-  if (S.score && !({hi: sc >= 80, mid: sc >= 50 && sc < 80, lo: sc < 50})[S.score]) return false;
+  if (S.score && !({hi: sc >= 75, mid: sc >= 50 && sc < 75, lo: sc < 50})[S.score]) return false;
   if (S.smin !== '' && sc < +S.smin) return false;
   if (S.smax !== '' && sc > +S.smax) return false;
   if (S.tier && r.tier !== S.tier) return false;
@@ -92,7 +92,7 @@ function chips() {
   const out = [];
   if (S.q) out.push(['q', `Search "${S.q}"`]);
   CHECKS.forEach(c => { if (S.f[c]) out.push(['c.' + c, `${L[c]}: ${st(S.f[c])[2]}`]); });
-  if (S.score) out.push(['score', {hi: 'Score 80 and above', mid: 'Score 50 to 79', lo: 'Score under 50'}[S.score]]);
+  if (S.score) out.push(['score', {hi: 'Score 75 and above', mid: 'Score 50 to 74', lo: 'Score under 50'}[S.score]]);
   if (S.smin !== '' || S.smax !== '') out.push(['range', `Score ${S.smin || 0} to ${S.smax || 100}`]);
   if (S.tier) out.push(['tier', `Tier ${S.tier}`]);
   if (S.owner) out.push(['owner', `Owner ${S.owner}`]);
@@ -144,7 +144,7 @@ function overview() {
     if (same.length) delta = weighted(same, r => r.overall_score) - weighted(same, r => +r.change.previous_score);
   }
   const n = R.length;
-  const hi = R.filter(r => r.overall_score >= 80).length, mid = R.filter(r => r.overall_score >= 50 && r.overall_score < 80).length;
+  const hi = R.filter(r => r.overall_score >= 75).length, mid = R.filter(r => r.overall_score >= 50 && r.overall_score < 75).length;
   const kpi = (val, label, cls, attrs) => `<button class="kpi ${cls || ''}" ${attrs}><b>${val}</b><span>${esc(label)}</span></button>`;
   let h = `<div class="print-head"><h1>${esc(APP.title)}</h1><p class="muted">${R.length} ${noun(2)}, assessed ${esc(M.generated || '')}</p></div>
   <div class="ov-top">
@@ -155,8 +155,8 @@ function overview() {
     </section>
     <section class="card kpi-card">
       ${APP.kpiFirst ? APP.kpiFirst(kpi, n) : kpi(n, noun(2) + ' assessed', '', 'data-route="domains"')}
-      ${kpi(hi, 'well protected, 80+', 'k-pass', 'data-filter="score" data-value="hi"')}
-      ${kpi(mid, 'need attention, 50 to 79', 'k-warn', 'data-filter="score" data-value="mid"')}
+      ${kpi(hi, 'well protected, 75+', 'k-pass', 'data-filter="score" data-value="hi"')}
+      ${kpi(mid, 'need attention, 50 to 74', 'k-warn', 'data-filter="score" data-value="mid"')}
       ${kpi(n - hi - mid, 'critical risk, under 50', 'k-fail', 'data-filter="score" data-value="lo"')}
       ${APP.kpis(kpi)}
     </section>
@@ -197,7 +197,7 @@ function overview() {
   // risk by tier
   const tiers = TIER_ORDER.filter(t => R.some(r => r.tier === t));
   if (tiers.length > 1) {
-    const bands = [['lo', 'Under 50', 'var(--fail)'], ['mid', '50 to 79', 'var(--warn)'], ['hi', '80+', 'var(--pass)']];
+    const bands = [['lo', 'Under 50', 'var(--fail)'], ['mid', '50 to 74', 'var(--warn)'], ['hi', '75+', 'var(--pass)']];
     const cnt = (t, b) => R.filter(r => r.tier === t && scoreCls(r.overall_score) === b).length;
     const mx = Math.max(1, ...tiers.flatMap(t => bands.map(b => cnt(t, b[0]))));
     h += `<section class="card"><header><h2>Risk by tier</h2><p>${cap(noun(2))} by tier and score</p></header><div class="body"><div class="rm">

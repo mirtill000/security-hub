@@ -83,16 +83,40 @@ def first_issue(r: dict) -> str:
     return (i or {}).get("message", "")
 
 
+def _scored(kind: str, r: dict) -> bool:
+    """The row was really assessed: domain answered / no read error, and at least one weighted check was measured
+    (a row with nothing measurable - e.g. a mail domain Proofpoint does not filter - would count as 100)."""
+    if kind in DOMAIN_AREAS:
+        return inventory.dns_measured(r)
+    if not inventory.waf_measured(r):
+        return False
+    b = r.get("score_breakdown")
+    return not isinstance(b, dict) or "max" not in b or bool(b.get("max"))
+
+
+def area_score(kind: str, payload: dict) -> Optional[float]:
+    """The score of an area, the same for the portal card, the area status, the trends and posture.json:
+    tier-weighted average of the items that were really assessed."""
+    rows = payload.get("results") or []
+    if kind == "ias":
+        tot = payload.get("totals") or {}
+        active = tot.get("active") or 0
+        if tot.get("limited") and active:   # only the users with findings are listed: share of clean users
+            return _pct(active - (tot.get("with_findings") or 0), active)
+    return weighted_avg([r for r in rows if _scored(kind, r)], payload.get("tiers") or TIER_W)
+
+
 def summarize_assets(kind: str, payload: dict) -> dict:
     rows = payload.get("results") or []
     tiers = payload.get("tiers") or TIER_W
-    measured = [r for r in rows if (inventory.dns_measured(r) if kind in DOMAIN_AREAS else inventory.waf_measured(r))]
-    avg = weighted_avg(measured, tiers)
+    measured = [r for r in rows if _scored(kind, r)]
+    avg = area_score(kind, payload)
     sev = Counter(i.get("severity") for r in rows for i in r.get("issues") or [])
     noun = ("domains" if kind in DOMAIN_AREAS + ("proofpoint",) else "endpoints" if kind == "edr" else "users" if kind == "ias" else "objects" if kind == "pra"
             else "websites")
-    kpis = [[len(rows), f"{noun} assessed"], *([[len(rows) - len(measured), "not verified (errors)", "warn"]] if len(measured) < len(rows) else []),
-            [sum(r.get("overall_score", 0) >= 80 for r in rows), "well protected (80+)", "pass"],
+    kpis = [[len(rows), f"{noun} assessed"], *([[len(rows) - len(measured), "not scored (nothing measurable or read error)", "warn"]]
+                                               if len(measured) < len(rows) else []),
+            [sum(r.get("overall_score", 0) >= 75 for r in rows), "well protected (75+)", "pass"],
             [sum(r.get("overall_score", 0) < 50 for r in measured), "at critical risk (under 50)", "fail"],
             [sev.get("critical", 0), "critical findings", "fail" if sev.get("critical") else ""]]
     if kind == "waf":
@@ -223,9 +247,10 @@ def _device_compliance(info: Any) -> Optional[Tuple[int, float, float]]:
 
 
 def _status(score: Optional[float], critical_exposure: bool) -> str:
+    """good = grade A/B (75+), warn = C/D (50-74), bad = F; a critical exposure is never 'good'."""
     if score is None:
         return "unknown"
-    st = "good" if score >= 80 else "warn" if score >= 50 else "bad"
+    st = "good" if score >= 75 else "warn" if score >= 50 else "bad"
     return "warn" if st == "good" and critical_exposure else st
 
 
@@ -287,7 +312,7 @@ def exec_email(payload: dict) -> dict:
         side.append(["Mail domains signing with DKIM", f"{_pct(signed, len(mail))}%", "good" if signed == len(mail) else "warn"])
     if unverified or len(measured) < len(rows):
         side.append(["Not verified (control not run, DNS errors)", f"{max(unverified, len(rows) - len(measured))} domains", "warn"])
-    score = weighted_avg(measured, payload.get("tiers") or TIER_W)
+    score = area_score("email", payload)
     deltas = [r["change"]["score_delta"] for r in measured if r.get("change") and r["change"].get("score_delta") is not None]
     trend = round(sum(deltas) / len(deltas), 1) if deltas else None
     worst = _pct(len(spoofable), len(known))
@@ -341,7 +366,7 @@ def exec_dns(payload: dict) -> dict:
         side.append(["Brands with lookalike domains able to receive mail", str(lk), "warn" if lk else "good"])
     if unverified:
         side.append(["Not verified (DNS errors)", plural(unverified), "warn"])
-    score = weighted_avg(measured, payload.get("tiers") or TIER_W)
+    score = area_score("dns", payload)
     deltas = [r["change"]["score_delta"] for r in measured if r.get("change") and r["change"].get("score_delta") is not None]
     exposure = bool(tk or ax or bogus or expired)
     head = None
@@ -389,7 +414,7 @@ def exec_waf(payload: dict) -> dict:
     if unverified:
         side.append(["Not verified (rules not checked, API errors)", f"{unverified} websites", "warn"])
     measured = [r for r in rows if inventory.waf_measured(r)]
-    score = weighted_avg(measured, payload.get("tiers") or TIER_W)
+    score = area_score("waf", payload)
     deltas = [r["change"]["score_delta"] for r in measured if r.get("change") and r["change"].get("score_delta") is not None]
     unprot = len(known) - len(protected)
     return {"status": _status(score, bool(bypass)), "kpis": kpis, "side": side,
@@ -433,7 +458,7 @@ def exec_edr(payload: dict) -> dict:
     if unverified:
         side.append(["Not verified (policy not readable)", f"{unverified} endpoints", "warn"])
     measured = [r for r in rows if st(r, "health") not in (None, "unknown")]
-    score = weighted_avg(measured, payload.get("tiers") or TIER_W)
+    score = area_score("edr", payload)
     deltas = [r["change"]["score_delta"] for r in rows if r.get("change") and r["change"].get("score_delta") is not None]
     exposure = bool(active or detect or broad or any(i.get("code") == "COVERAGE_GAP" for i in acc))
     head = None
@@ -508,7 +533,7 @@ def exec_proofpoint(payload: dict) -> dict:
     if q:
         side.append(["Condemned messages pulled after being read", str(q.get("pulled_read", 0)), "warn" if q.get("pulled_read") else "good"])
     measured = [r for r in rows if r.get("score_breakdown", {}).get("max")]
-    score = weighted_avg(measured, payload.get("tiers") or TIER_W)
+    score = area_score("proofpoint", payload)
     deltas = [r["change"]["score_delta"] for r in rows if r.get("change") and r["change"].get("score_delta") is not None]
     head = None
     if users:
@@ -558,10 +583,7 @@ def exec_ias(payload: dict) -> dict:
         side.append(["IAS password without second factor", str(len(nomfa)), "bad" if nomfa else "good"])
     if tot.get("last_login_visible"):
         side.append(["Inactive or never used", str(len(inactive)), "warn" if inactive else "good"])
-    if tot.get("limited"):  # only the users with findings are listed: score from the share of clean users
-        score = _pct(active - (tot.get("with_findings") or 0), active) if active else None
-    else:
-        score = weighted_avg(rows, payload.get("tiers") or TIER_W)
+    score = area_score("ias", payload)
     deltas = [r["change"]["score_delta"] for r in rows if r.get("change") and r["change"].get("score_delta") is not None]
     head = None
     if priv:
@@ -613,7 +635,7 @@ def exec_pra(payload: dict) -> dict:
     if s:
         side.append([f"Sessions not recorded ({s.get('days')} days)", f"{s.get('unrecorded', 0)} of {s.get('total', 0)}",
                      "warn" if s.get("unrecorded") else "good"])
-    score = weighted_avg(rows, payload.get("tiers") or TIER_W)
+    score = area_score("pra", payload)
     deltas = [r["change"]["score_delta"] for r in rows if r.get("change") and r["change"].get("score_delta") is not None]
     head = None
     if admin_nomfa:
@@ -775,6 +797,24 @@ def _read_report(path: str, kind: Optional[str] = None) -> Tuple[str, Optional[d
     return text, payload, title or os.path.basename(path)
 
 
+STATUS_MAX_SCORE = {"warn": 74, "bad": 49}   # highest score of the grade band of each status (C/D, F)
+
+
+def _align_score(summary: dict) -> None:
+    """Score, grade and status must tell the same story: an area 'needing attention' because of a critical exposure
+    (threats delivered, a malicious click allowed, an exposed admin...) cannot show 99/A. Its score is brought down to
+    the top of the band of its status, and the reason is kept for the card."""
+    ex, score = summary.get("exec") or {}, summary.get("score")
+    top = STATUS_MAX_SCORE.get(ex.get("status"))
+    if score is None or top is None or score <= top:
+        return
+    head = ex.get("headline") or [None, None]
+    crit = next((a for a in ex.get("actions") or [] if a.get("severity") == "critical"), None)
+    reason = head[1] or (crit or {}).get("title") or "critical findings"
+    summary["score_uncapped"], summary["score"] = score, top
+    summary["score_cap"] = f"Capped at {top} (average {round(score)}): {reason}"
+
+
 def load_report(path: str, idx: int, keep: bool = True) -> dict:
     """Metadata, summary and executive metrics of a report; with keep=False the page and its parsed data are
     dropped right away (history runs only feed the KPI trends: keeping them would cost hundreds of MB)."""
@@ -796,6 +836,7 @@ def load_report(path: str, idx: int, keep: bool = True) -> dict:
                                "ias": exec_ias, "pra": exec_pra, "zta": exec_zta}[kind](payload)
         except Exception as e:
             print(f"Warning: executive metrics of {os.path.basename(path)} not available ({type(e).__name__}: {e})", file=sys.stderr)
+    _align_score(summary)
     if not summary.get("generated"):
         summary["generated"] = datetime.fromtimestamp(os.path.getmtime(path), timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     when = parse_date(summary.get("generated", "")) or datetime.fromtimestamp(os.path.getmtime(path), timezone.utc)
@@ -887,7 +928,7 @@ def split_history(reports: List[dict]) -> Tuple[List[dict], dict]:
             key = f"score|{kind}|{subj}"
             if r.get("score") is not None:
                 series.setdefault(key, {"id": key, "key": "score", "label": f"{r['label']} score", "unit": "/100", "area": kind,
-                                        "subject": subj, "target": 80, "points": []})["points"].append([r["date"], r["score"]])
+                                        "subject": subj, "target": 75, "points": []})["points"].append([r["date"], r["score"]])
             for k in (r.get("exec") or {}).get("kpis", []):
                 if k.get("value") is None:
                     continue

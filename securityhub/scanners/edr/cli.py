@@ -159,7 +159,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     cov = extra.get("coverage")
     print(f"\n{'=' * 60}\nSUMMARY\n{'=' * 60}")
     print(f"Endpoints assessed:       {len(results)}")
-    print(f"Well protected (>=80):    {sum(r.overall_score >= 80 for r in results)}")
+    print(f"Well protected (>=75):    {sum(r.overall_score >= 75 for r in results)}")
     print(f"Detect mode only:         {prof['detect']}")
     print(f"Stale or disabled:        {prof['stale'] + prof['disabled']}")
     print(f"Active threats:           {sum(1 for r in results if any(i.code == 'THREAT_ACTIVE' for i in r.issues))}")

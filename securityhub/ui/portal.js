@@ -5,7 +5,7 @@ const H = JSON.parse(document.getElementById('hub-data').textContent);
 const RP = H.reports, M = H.meta;
 const ESC = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'};
 const $ = (s, r) => (r || document).querySelector(s);
-const scoreCls = n => n === null || n === undefined ? '' : n >= 80 ? 'hi' : n >= 50 ? 'mid' : 'lo';
+const scoreCls = n => n === null || n === undefined ? '' : n >= 75 ? 'hi' : n >= 50 ? 'mid' : 'lo';
 const ICONS = {
   grid: '<path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/>', shield: '<path d="M12 3 4 6v6c0 5 3.4 8.6 8 9.5 4.6-.9 8-4.5 8-9.5V6l-8-3z"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
   pra: '<rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v2"/>', ias: '<circle cx="9" cy="8" r="3.5"/><path d="M3 20c.8-3.4 3.2-5.5 6-5.5s4.4 1.4 5.3 3M15.5 14.5h5v5h-5zM16.5 14.5v-1.5a1.5 1.5 0 0 1 3 0v1.5"/>', proofpoint: '<path d="M3 6h18v12H3zM3 7l9 6 9-6"/><path d="M12 3l7 3v0"/>', edr: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4M9.5 10l2 2 3.5-3.5"/>', email: '<path d="M3 5h18v14H3zM3 6l9 7 9-7"/>', dns: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/>', waf: '<path d="M4 6h16M4 12h16M4 18h16M8 6v6M16 12v6M12 18v-6"/>', zta: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.2-3.6 4-5.5 7-5.5s5.8 1.9 7 5.5"/>',
@@ -380,7 +380,7 @@ function overview() {
   const areaHtml = `<div class="exec-areas">${RP.map(r => { const x = r.exec, st = AREA_ST[(x || {}).status || 'unknown'];
     return `<section class="card exec-area"><header><span class="hub-type">${icon(r.type)}${esc(r.label)}</span><span class="act"><span class="pill s-${st[1]}">${esc(st[0])}</span></span></header>
       <div class="body"><div class="exec-area-head"><span class="letter g-${esc(r.grade)}">${esc(r.grade)}</span><div><b class="num">${r.score === null || r.score === undefined ? '-' : esc(r.score)}<small>/100</small></b>
-        <div class="lbl">${esc(r.subtitle || r.title)}</div>${freshTag(r)}${histDelta(seriesFor('score', r)) || (x ? trendChip(x.trend, r.type === 'zta' ? ' pts' : ' pts avg') : '')}</div>${spark(seriesFor('score', r)) ? `<div class="area-spark">${spark(seriesFor('score', r))}</div>` : ''}</div>
+        <div class="lbl">${esc(r.subtitle || r.title)}</div>${r.score_cap ? `<div class="lbl tx-warn" title="${esc(r.score_cap)}">${esc(r.score_cap)}</div>` : ''}${freshTag(r)}${histDelta(seriesFor('score', r)) || (x ? trendChip(x.trend, r.type === 'zta' ? ' pts' : ' pts avg') : '')}</div>${spark(seriesFor('score', r)) ? `<div class="area-spark">${spark(seriesFor('score', r))}</div>` : ''}</div>
       ${x ? `<ul class="exec-side">${x.side.map(([l, v, tn]) => `<li><span>${esc(l)}</span><b class="tx-${esc(tn)}">${esc(v)}</b></li>`).join('')}</ul>` : '<p class="muted">Not a Guard report: open it to view the content.</p>'}
       <button class="btn" data-open="${r.id}" style="margin-top:auto;align-self:flex-start">Open report</button></div></section>`; }).join('')}</div>`;
   const acts = PF.actions || [];
