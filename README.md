@@ -547,3 +547,22 @@ Ogni area del portale mostra, oltre allo score complessivo, due cifre separate:
 - **Igiene** (/100): solo i controlli di configurazione, senza i limiti imposti dalle esposizioni;
 - **Esposizione attiva**: elementi con una minaccia, un click consentito, un account senza MFA, un bypass, un nome
   dirottabile... (più quelle a livello di organizzazione). Sono anche in `posture.json` e nei trend.
+
+Le due cifre sono cliccabili: *Igiene* apre la panoramica del report, *Esposizione attiva* apre il report filtrato
+sugli elementi esposti.
+
+## Esposto ora
+
+La pagina **Exposed now** del portale elenca in un'unica lista tutto ciò che è sfruttabile oggi, in tutti i moduli:
+minacce attive, click consentiti, account senza MFA, bypass, rischi di takeover, esposizioni a livello di
+organizzazione e rischi incrociati tra moduli. Ordinata per gravità e anzianità, filtrabile per area; ogni riga apre
+il report sull'elemento. Il riepilogo (totali e primi 100 elementi) è anche in `posture.json` (`exposed_now`).
+
+## Storico dei finding (da quanto sono aperti, MTTR)
+
+Ogni `securityhub run` aggiorna `<output_dir>/findings_state.json`: per ogni finding critico o warning (area,
+elemento, codice) registra la prima volta in cui è comparso e, quando sparisce da un report più recente, il tempo
+di risoluzione. Il portale mostra per area i finding aperti, l'età mediana, quanti sono aperti da più di 30 giorni e
+l'**MTTR** (mediana dei giorni per risolvere, finding risolti negli ultimi 90 giorni); la pagina *Exposed now* mostra
+da quanto è aperta ogni esposizione. I finding già presenti al primo avvio sono indicati come "≥ N giorni" e non
+entrano nell'MTTR (la loro età reale non è nota). Gli stessi dati sono in `posture.json` (`finding_age` per area).

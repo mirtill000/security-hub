@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from .common import EXIT_OK, EXIT_USAGE, Parser, atomic_open, atomic_write, grade, json_for_html
-from . import correlations, inventory, ui
+from . import correlations, finding_state, inventory, ui
 
 __version__ = "1.2.0"
 
@@ -1162,6 +1162,33 @@ def report_page(r: dict) -> str:
 HUB_MARKERS = re.compile(r"(__TITLE__|__CSS__|__JS__|__DATA__|__REPORTS__)")
 
 
+EXPOSED_MAX = 500
+SEV_RANK = {"critical": 0, "warning": 1, "info": 2}
+
+
+def exposed_now(reports: List[dict], joined: Optional[dict] = None) -> dict:
+    """Everything exploitable now, across modules: exposure findings of each area (threats, allowed clicks, missing MFA,
+    bypasses, takeover...), organization-level exposures and cross-module risks; most severe and oldest first."""
+    items: List[dict] = []
+    for r in reports:
+        for f in r.get("open_findings") or []:
+            if not f.get("exposure"):
+                continue
+            items.append({"area": r["type"], "report": r["id"], "label": r["label"], "item": f["item"], "code": f["code"],
+                          "severity": f["severity"], "message": f["message"], "org": bool(f.get("org")),
+                          "hash": "#/overview" if f.get("org") else "#/domains?d=" + f["item"],
+                          "first_seen": f.get("first_seen"), "age_days": f.get("age_days"), "since_start": f.get("since_start")})
+    for x in ((joined or {}).get("links") or {}).get("links") or []:
+        ref = (x.get("refs") or [{}])[0]
+        items.append({"area": "links", "report": ref.get("report"), "label": "Cross-module", "item": x.get("subject"),
+                      "code": x.get("code"), "severity": x.get("severity"), "message": x.get("title") or x.get("text") or "",
+                      "detail": x.get("text"), "refs": x.get("refs") or [], "hash": ref.get("hash") or "", "org": False})
+    items.sort(key=lambda i: (SEV_RANK.get(i["severity"], 9), -(i.get("age_days") or 0), i["area"], str(i["item"])))
+    by_area = Counter(i["area"] for i in items)
+    by_sev = Counter(i["severity"] for i in items)
+    return {"items": items[:EXPOSED_MAX], "total": len(items), "by_area": dict(by_area), "by_severity": dict(by_sev)}
+
+
 def build_hub(reports: List[dict], out: str, title: str, history: Optional[dict] = None,
               max_age: Optional[Dict[str, float]] = None, failed: Optional[Dict[str, dict]] = None,
               joined: Optional[dict] = None, health: Optional[dict] = None) -> int:
@@ -1176,7 +1203,8 @@ def build_hub(reports: List[dict], out: str, title: str, history: Optional[dict]
             "max_age_days": {**MAX_AGE_DAYS, **(max_age or {})},
             "portfolio": portfolio(reports), "history": history or {"series": [], "runs": []},
             "inventory": joined["inventory"], "links": joined["links"], "health": health or {}}
-    index = [{k: v for k, v in r.items() if k not in ("html", "payload", "path")} for r in reports]
+    meta["exposed"] = exposed_now(reports, joined)
+    index = [{k: v for k, v in r.items() if k not in ("html", "payload", "path", "open_findings")} for r in reports]
     with atomic_open(out) as f:
         for part in HUB_MARKERS.split(HUB_TEMPLATE):
             if part == "__TITLE__":
@@ -1219,6 +1247,12 @@ def collect(inputs: List[str], include_all: bool = False, exclude: Optional[List
     reports, history = split_history(loaded)
     for r in reports:  # only the latest run of each tool is correlated: load its data again, keeping what the joins use
         _, payload, _ = _read_report(r["path"])
+        if r["type"] != "other" and isinstance(payload, dict):   # for the finding history and the "Exposed now" page
+            expo = EXPOSURE_CODES.get(r["type"], set())
+            r["open_findings"] = finding_state.finding_list(r["type"], payload)
+            for f in r["open_findings"]:
+                if f["code"] in expo:
+                    f["exposure"] = True
         r["payload"] = slim_payload(r["type"], payload)
         del payload
     reports.sort(key=lambda r: (TYPE_ORDER[r["type"]], r["title"]))
@@ -1279,6 +1313,7 @@ def posture(reports: List[dict], history: Optional[dict] = None, max_age: Option
             **({"hygiene": r["split"]["hygiene"], "exposure": {k: r["split"][k] for k in ("exposed", "assessed", "exposed_pct", "org_exposures")}}
                if r.get("split") else {}),
             **({"coverage": r["coverage"]} if r.get("coverage") else {}),
+            **({"finding_age": r["finding_age"]} if r.get("finding_age") else {}),
             **({"last_run_failed": (failed or {})[r["type"]]} if r["type"] in (failed or {}) else {}),
         })
     pf = portfolio(reports)
@@ -1295,7 +1330,14 @@ def posture(reports: List[dict], history: Optional[dict] = None, max_age: Option
             "links": {"summary": lk["summary"],
                       "items": [dict({k: x[k] for k in ("severity", "code", "title", "subject", "text")}, areas=sorted({r["area"] for r in x["refs"]}))
                                 for x in lk["links"]]},
+            "exposed_now": _exposed_summary(exposed_now(reports, joined or {"links": lk})),
             "runs": (history or {}).get("runs", [])}
+
+
+def _exposed_summary(x: dict, n: int = 100) -> dict:
+    keep = ("area", "label", "item", "code", "severity", "message", "first_seen", "age_days")
+    return {"total": x["total"], "by_area": x["by_area"], "by_severity": x["by_severity"],
+            "items": [{k: i.get(k) for k in keep if i.get(k) is not None} for i in x["items"][:n]]}
 
 
 def main(argv: Optional[List[str]] = None) -> int:

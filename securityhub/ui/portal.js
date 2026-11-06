@@ -7,6 +7,7 @@ const ESC = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
 const $ = (s, r) => (r || document).querySelector(s);
 const scoreCls = n => n === null || n === undefined ? '' : n >= 75 ? 'hi' : n >= 50 ? 'mid' : 'lo';
 const ICONS = {
+  alert: '<path d="M12 3.5 2.5 20h19L12 3.5zM12 10v4.5M12 17.2h.01"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M14 9l2 2"/>',
   pulse: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
   grid: '<path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/>', shield: '<path d="M12 3 4 6v6c0 5 3.4 8.6 8 9.5 4.6-.9 8-4.5 8-9.5V6l-8-3z"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
@@ -309,6 +310,41 @@ function statusView() {
     <div class="grid-wrap"><table class="grid"><thead><tr><th class="sticky">Area</th><th>Credentials and API</th><th>Last run</th><th>Data</th><th class="r">Items scored</th><th class="r" title="Checks not evaluated because an API or DNS answer could not be read">Read errors</th><th class="r" title="Checks that cannot be verified by design: e.g. DKIM for a domain not listed in dkim.csv, agents not seen for weeks, data the tenant does not expose">Not verifiable</th><th>API errors / not configured</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="section-title" style="margin-top:20px"><h2>Credentials and APIs</h2><p>${DOC ? `securityhub doctor, ${esc(fmtD(DOC.generated))}${docAge !== null && docAge > 48 ? ` <span class="pill s-warn">${docAge} hours ago</span>` : ''}: one read-only call per module` : 'Not checked yet'}</p></div>${docHtml}`;
 }
+/* ---------- exposed now: everything exploitable today, across modules ---------- */
+const XP = M.exposed || {items: [], total: 0, by_area: {}, by_severity: {}};
+const ageTxt = x => x.age_days === null || x.age_days === undefined ? '' : x.age_days < 1 ? (x.since_start ? 'since tracking' : 'new today')
+  : `${x.since_start ? '\u2265 ' : ''}${Math.floor(x.age_days)} day${Math.floor(x.age_days) === 1 ? '' : 's'}`;
+function exposedView() {
+  if (!XP.total) return '<div class="card empty"><b>Nothing exposed right now</b>No threat, allowed click, account without MFA, bypass or takeover risk in the latest reports.</div>';
+  const items = XP.items.filter(x => (!S.xa || x.area === S.xa) && (!S.xs || x.severity === S.xs));
+  const areas = Object.entries(XP.by_area).sort((a, b) => b[1] - a[1]);
+  const lab = a => a === 'links' ? 'Cross-module' : AREA_LAB[a] || a;
+  const sev = XP.by_severity || {};
+  const head = `<div class="stat-strip" style="margin-bottom:14px">
+      <button class="stat" data-xs=""${!S.xs ? ' aria-pressed="true"' : ''}><b>${XP.total}</b><span>exposures</span></button>
+      <button class="stat" data-xs="critical"${S.xs === 'critical' ? ' aria-pressed="true"' : ''}><b class="tx-bad">${sev.critical || 0}</b><span>critical</span></button>
+      <button class="stat" data-xs="warning"${S.xs === 'warning' ? ' aria-pressed="true"' : ''}><b class="tx-warn">${sev.warning || 0}</b><span>warning</span></button></div>
+    <div class="toolbar"><div class="seg" role="group" aria-label="Area"><button data-xa="" aria-pressed="${!S.xa}">All areas</button>${areas.map(([a, n]) =>
+      `<button data-xa="${esc(a)}" aria-pressed="${S.xa === a}">${esc(lab(a))} <span class="faint">${n}</span></button>`).join('')}</div></div>`;
+  const rows = items.map(x => `<tr${x.report ? ` data-go="${esc(x.report)}" data-h="${esc(x.hash || '')}"` : ''}>
+      <td class="sticky xp-item"><span class="sev-bar sev-${esc(x.severity)}"></span><b>${esc(x.org ? 'Organization' : x.item)}</b>
+        <div class="dom-sub"><span class="hub-type">${x.area === 'links' ? icon('link', 13) : icon(x.area, 13)}${esc(lab(x.area))}</span>${x.refs && x.refs.length > 1 ? ' (' + x.refs.map(r => esc(r.label)).join(' + ') + ')' : ''}, <span class="${x.severity === 'critical' ? 'tx-bad' : 'tx-warn'}">${esc(x.severity)}</span></div></td>
+      <td>${esc(x.message)}${x.detail && x.detail !== x.message ? `<div class="sub">${esc(x.detail)}</div>` : ''}</td>
+      <td class="nowrap num" title="${esc(x.first_seen ? 'First seen ' + fmtD(x.first_seen) + (x.since_start ? ' (already open when the history started)' : '') : 'No history yet: kept by securityhub run')}">${esc(ageTxt(x)) || '<span class="faint">-</span>'}</td></tr>`).join('');
+  return head + `<div class="grid-wrap"><table class="grid"><thead><tr><th class="sticky">Item</th><th>Exposure</th><th>Open for</th></tr></thead><tbody>
+    ${rows || '<tr><td colspan="3" class="empty">No exposure with these filters.</td></tr>'}</tbody></table></div>
+    ${XP.total > XP.items.length ? `<p class="muted" style="margin-top:10px">Showing the ${XP.items.length} most severe of ${XP.total}: open each report for the full list.</p>` : ''}
+    <p class="sub" style="margin-top:10px">Exposure findings only (threats, allowed clicks, accounts without MFA, bypasses, takeover risk...) plus cross-module risks. Select a row to open the report on that item.</p>`;
+}
+function ageHtml(r) {   // finding history of the area: how long findings stay open, how fast they are fixed
+  const a = r.finding_age;
+  if (!a) return '';
+  const parts = [`${a.open} open finding${a.open === 1 ? '' : 's'}`];
+  if (a.median_age_days !== null && a.open) parts.push(`median age ${Math.round(a.median_age_days)} d`);
+  if (a.over_30_days) parts.push(`<span class="tx-warn">${a.over_30_days} over 30 d</span>`);
+  parts.push(a.mttr_days === null ? '<span class="faint">MTTR n/a</span>' : `MTTR ${a.mttr_days < 1 ? '<1' : Math.round(a.mttr_days)} d`);
+  return `<div class="lbl" title="Critical and warning findings. Age counted from the first report showing them${a.tracked_since ? ' (history since ' + esc(fmtD(a.tracked_since)) + ')' : ''}; MTTR: median days to fix, findings resolved in the last 90 days.">${parts.join(' \u00b7 ')}</div>`;
+}
 function splitHtml(r) {
   const x = r.split;
   if (!x) return '';
@@ -321,13 +357,14 @@ function splitHtml(r) {
 }
 
 /* ---------- state & routing: #/overview, #/trends, #/assets[?a=<asset>|?f=<filter>] or #/r/<id>?h=<report hash> ---------- */
-const S = {route: 'overview', id: null, asset: null, af: 'all', aq: '', asort: {k: 'risk', d: 1}, apage: 1};
+const S = {route: 'overview', id: null, asset: null, xa: '', xs: '', af: 'all', aq: '', asort: {k: 'risk', d: 1}, apage: 1};
 let aqTimer = null;
-function toHash() { if (S.route === 'trends') return '#/trends'; if (S.route === 'status') return '#/status';
+function toHash() { if (S.route === 'trends') return '#/trends'; if (S.route === 'status') return '#/status'; if (S.route === 'exposed') return '#/exposed';
   if (S.route === 'assets') return '#/assets' + (S.asset ? '?a=' + encodeURIComponent(S.asset) : S.af !== 'all' ? '?f=' + S.af : ''); if (S.route !== 'r') return '#/overview'; const f = frames[S.id]; return `#/r/${S.id}${f && f.hash ? '?h=' + encodeURIComponent(f.hash) : ''}`; }
 function fromHash() {
   if (location.hash === '#/trends' && hasTrends()) return {route: 'trends', id: null, inner: ''};
   if (location.hash === '#/status') return {route: 'status', id: null, inner: ''};
+  if (location.hash === '#/exposed') return {route: 'exposed', id: null, inner: ''};
   const am = location.hash.match(/^#\/assets(?:\?(.*))?$/);
   if (am && hasAssets()) { const q = new URLSearchParams(am[1] || ''); return {route: 'assets', id: null, inner: '', asset: q.get('a'), af: q.get('f') || 'all'}; }
   const m = location.hash.match(/^#\/r\/([^?]+)(?:\?h=(.*))?$/);
@@ -359,6 +396,7 @@ function subNav(r) {
 function side() {
   return `<div class="brand"><div class="brand-mark">${icon('shield', 18)}</div><div><b>GuardHub</b>${M.title ? `<small>${esc(M.title)}</small>` : ''}</div></div>
     <nav class="nav" aria-label="Portal"><button class="nav-item" data-home${S.route === 'overview' ? ' aria-current="page"' : ''}>${icon('grid')}<span>Overview</span></button>
+      ${XP.total ? `<button class="nav-item" data-exposed${S.route === 'exposed' ? ' aria-current="page"' : ''}>${icon('alert')}<span>Exposed now</span><span class="count${(XP.by_severity || {}).critical ? ' tx-bad' : ''}">${XP.total}</span></button>` : ''}
       <button class="nav-item" data-status${S.route === 'status' ? ' aria-current="page"' : ''}>${icon('pulse')}<span>Status</span>${healthBadge()}</button>
       ${hasTrends() ? `<button class="nav-item" data-trends${S.route === 'trends' ? ' aria-current="page"' : ''}>${icon('trend')}<span>Trends</span><span class="count">${RUNS.length}</span></button>` : ''}
       ${hasAssets() ? `<button class="nav-item" data-assets${S.route === 'assets' ? ' aria-current="page"' : ''}>${icon('assets')}<span>Assets</span><span class="count">${AS.length}</span></button>` : ''}
@@ -375,6 +413,7 @@ function topbar() {
   if (S.route === 'assets' && S.asset) return `<button class="btn icon ghost" data-assets aria-label="Back to the assets" title="Assets">${icon('left')}</button>
     <div class="hub-crumb"><span class="faint">Assets</span><span class="faint">/</span><h1>${esc(S.asset)}</h1></div><span class="spacer"></span>${searchBtn}<button class="btn" data-action="print">${icon('print')}<span>Print</span></button>`;
   if (S.route === 'assets') return `<h1>Assets</h1><span class="sub">${plural(AS.length, 'asset')} across reports</span><span class="spacer"></span>${searchBtn}<button class="btn" data-action="print">${icon('print')}<span>Print</span></button>`;
+  if (S.route === 'exposed') return `<h1>Exposed now</h1><span class="sub">What can be exploited today, across modules</span><span class="spacer"></span>${searchBtn}<button class="btn" data-action="print">${icon('print')}<span>Print</span></button>`;
   if (S.route === 'status') return `<h1>Status</h1><span class="sub">Credentials, APIs and data of every module</span><span class="spacer"></span>${searchBtn}<button class="btn" data-action="print">${icon('print')}<span>Print</span></button>`;
   if (S.route === 'trends') return `<h1>Trends</h1><span class="sub">${RUNS.length} assessments</span><span class="spacer"></span>${searchBtn}<button class="btn" data-action="print">${icon('print')}<span>Print</span></button>`;
   if (S.route !== 'r') return `<h1>${esc(M.title || 'Overview')}</h1><span class="sub">${RP.length} report${RP.length === 1 ? '' : 's'}, portal generated ${esc(M.generated)}</span><span class="spacer"></span>
@@ -434,7 +473,7 @@ function overview() {
   const areaHtml = `<div class="exec-areas">${RP.map(r => { const x = r.exec, st = AREA_ST[(x || {}).status || 'unknown'];
     return `<section class="card exec-area"><header><span class="hub-type">${icon(r.type)}${esc(r.label)}</span><span class="act">${credBadge(r)}<span class="pill s-${st[1]}">${esc(st[0])}</span></span></header>
       <div class="body"><div class="exec-area-head"><span class="letter g-${esc(r.grade)}">${esc(r.grade)}</span><div><b class="num">${r.score === null || r.score === undefined ? '-' : esc(r.score)}<small>/100</small></b>
-        <div class="lbl">${esc(r.subtitle || r.title)}</div>${splitHtml(r)}${r.score_cap ? `<div class="lbl tx-warn" title="${esc(r.score_cap)}">${esc(r.score_cap)}</div>` : ''}${freshTag(r)}${histDelta(seriesFor('score', r)) || (x ? trendChip(x.trend, r.type === 'zta' ? ' pts' : ' pts avg') : '')}</div>${spark(seriesFor('score', r)) ? `<div class="area-spark">${spark(seriesFor('score', r))}</div>` : ''}</div>
+        <div class="lbl">${esc(r.subtitle || r.title)}</div>${splitHtml(r)}${ageHtml(r)}${r.score_cap ? `<div class="lbl tx-warn" title="${esc(r.score_cap)}">${esc(r.score_cap)}</div>` : ''}${freshTag(r)}${histDelta(seriesFor('score', r)) || (x ? trendChip(x.trend, r.type === 'zta' ? ' pts' : ' pts avg') : '')}</div>${spark(seriesFor('score', r)) ? `<div class="area-spark">${spark(seriesFor('score', r))}</div>` : ''}</div>
       ${x ? `<ul class="exec-side">${x.side.map(([l, v, tn]) => `<li><span>${esc(l)}</span><b class="tx-${esc(tn)}">${esc(v)}</b></li>`).join('')}</ul>` : '<p class="muted">Not a Guard report: open it to view the content.</p>'}
       <button class="btn" data-open="${r.id}" style="margin-top:auto;align-self:flex-start">Open report</button></div></section>`; }).join('')}</div>`;
   const acts = PF.actions || [];
@@ -460,10 +499,10 @@ function render() {
   chrome();
   const inReport = S.route === 'r';
   document.body.classList.toggle('in-report', inReport);
-  $('#view').innerHTML = inReport ? '' : S.route === 'trends' ? trends() : S.route === 'status' ? statusView() : S.route === 'assets' ? assetsView() : overview();
+  $('#view').innerHTML = inReport ? '' : S.route === 'trends' ? trends() : S.route === 'status' ? statusView() : S.route === 'exposed' ? exposedView() : S.route === 'assets' ? assetsView() : overview();
   Object.entries(frames).forEach(([id, f]) => { f.el.hidden = !(inReport && id === S.id); });
   const r = inReport ? RP.find(x => x.id === S.id) : null;
-  document.title = (r ? r.label + ' - ' : S.route === 'trends' ? 'Trends - ' : S.route === 'status' ? 'Status - ' : S.route === 'assets' ? (S.asset ? S.asset + ' - ' : '') + 'Assets - ' : '') + (M.title || 'GuardHub');
+  document.title = (r ? r.label + ' - ' : S.route === 'trends' ? 'Trends - ' : S.route === 'status' ? 'Status - ' : S.route === 'exposed' ? 'Exposed now - ' : S.route === 'assets' ? (S.asset ? S.asset + ' - ' : '') + 'Assets - ' : '') + (M.title || 'GuardHub');
 }
 
 /* ---------- search across all reports ---------- */
@@ -492,7 +531,7 @@ function buildIndex() {
 function paletteItems(q) {
   q = q.trim().toLowerCase();
   const out = [], add = (g, t, h, run) => out.push({g, t, h, run});
-  [['Overview', () => home()], ['Status', () => page('status')], ...(hasTrends() ? [['Trends', () => page('trends')]] : []), ...(hasAssets() ? [['Assets', () => openAsset(null)]] : [])].forEach(([t, fn]) => { if (!q || t.toLowerCase().includes(q)) add('Go to', t, '', fn); });
+  [['Overview', () => home()], ['Status', () => page('status')], ...(XP.total ? [['Exposed now', () => page('exposed')]] : []), ...(hasTrends() ? [['Trends', () => page('trends')]] : []), ...(hasAssets() ? [['Assets', () => openAsset(null)]] : [])].forEach(([t, fn]) => { if (!q || t.toLowerCase().includes(q)) add('Go to', t, '', fn); });
   RP.forEach(r => { if (!q || r.label.toLowerCase().includes(q) || (r.subtitle || '').toLowerCase().includes(q)) add('Reports', r.label, r.subtitle, () => open(r.id, '')); });
   if (S.route === 'r' && frames[S.id]) frames[S.id].nav.filter(x => x.route || x.pillar).forEach(x => { if (!q || x.label.toLowerCase().includes(q)) add('In this report', x.label, x.count, () => tell(S.id, {mgHubClick: x.route ? {route: x.route} : {pillar: x.pillar}})); });
   if (q) {
@@ -542,6 +581,9 @@ document.addEventListener('click', e => {
   if (ds.pal !== undefined) { runPalette(+ds.pal); return; }
   if (ds.home !== undefined) { home(); return; }
   if (ds.trends !== undefined) { page('trends'); return; }
+  if (ds.exposed !== undefined) { page('exposed'); return; }
+  if (ds.xa !== undefined) { S.xa = ds.xa; render(); return; }
+  if (ds.xs !== undefined) { S.xs = ds.xs; render(); return; }
   if (ds.status !== undefined) { page('status'); return; }
   if (ds.assets !== undefined) { openAsset(null); return; }
   if (ds.lall !== undefined) { S.lall = !S.lall; render(); return; }
@@ -584,7 +626,7 @@ document.addEventListener('keydown', e => {
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === '/') { e.preventDefault(); openPalette(); return; }
   const n = parseInt(e.key, 10);
-  if (e.key === '0') home(); else if (e.key === 't' && hasTrends()) page('trends'); else if (e.key === 'a' && hasAssets()) openAsset(null); else if (n >= 1 && n <= RP.length) open(RP[n - 1].id, '');
+  if (e.key === '0') home(); else if (e.key === 't' && hasTrends()) page('trends'); else if (e.key === 'e' && XP.total) page('exposed'); else if (e.key === 'a' && hasAssets()) openAsset(null); else if (n >= 1 && n <= RP.length) open(RP[n - 1].id, '');
 });
 
 applyTheme();

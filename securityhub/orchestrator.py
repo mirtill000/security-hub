@@ -469,6 +469,15 @@ def load_health(out_dir: str) -> dict:
     return out
 
 
+def _track_findings(out_dir: str, reports: List[dict], write: bool) -> None:
+    """Finding history (first seen, MTTR) in out_dir/findings_state.json: never fails the run."""
+    from . import finding_state
+    try:
+        finding_state.track(out_dir, reports, write=write)
+    except Exception as e:      # noqa: BLE001 - history is a convenience: the assessment itself must complete
+        print(f"Warning: finding history not updated ({type(e).__name__}: {e})", file=sys.stderr)
+
+
 def refresh_portal(config_path: str, out_dir: str) -> Optional[str]:
     """Rebuild the portal from the reports already in out_dir (no module run), e.g. after `securityhub doctor`,
     keeping the 'last run failed' banners of posture.json; publish it when the configuration says so."""
@@ -486,6 +495,7 @@ def refresh_portal(config_path: str, out_dir: str) -> Optional[str]:
         pass
     max_age = {k: float(v) for k, v in (cfg.get("max_age_days") or {}).items()}
     reports, history = portal.collect(runs)
+    _track_findings(out_dir, reports, write=False)
     hub = os.path.join(out_dir, "security_hub.html")
     portal.build_hub(reports, hub, str(cfg.get("title") or ""), history, max_age, failed, health=load_health(out_dir))
     publish = parse_publish(cfg.get("publish"), base_dir)
@@ -760,6 +770,7 @@ def _execute(cfg, plans, out_dir, stamp, when, run_dir, parallel, max_age, fail_
             for area in [r.name] + (["email"] if r.name == "dns" and "--email-output" in r.argv else []):
                 failed[area] = info
     reports, history = portal.collect(list_runs(out_dir))
+    _track_findings(out_dir, reports, write=True)
     hub = os.path.join(out_dir, "security_hub.html")
     joined = portal.joins(reports)   # inventory and cross-module risks: once, for the portal and posture.json
     # last run of EVERY module: a partial run (securityhub run edr) updates its modules and keeps the others
