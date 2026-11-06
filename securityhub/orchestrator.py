@@ -43,12 +43,14 @@ MODULES: Dict[str, Tuple[str, Optional[str], str]] = {
     "waf": ("securityhub.scanners.waf", None, "Imperva Cloud WAF (WAFGuard)"),
     "edr": ("securityhub.scanners.edr", None, "SentinelOne EDR (EDRGuard)"),
     "ias": ("securityhub.scanners.sap_ias", None, "SAP Cloud Identity (IASGuard)"),
+    "pra": ("securityhub.scanners.pra", None, "BeyondTrust PRA (PRAGuard)"),
     "zta": ("securityhub.scanners.zero_trust", "input", "Microsoft Zero Trust (ZTAGuard)"),
 }
 ORDER = list(MODULES)
 # Command names and aliases accepted wherever a module name is expected (--only)
 MODULE_ALIASES = {"sap-ias": "ias", "sap": "ias", "sentinelone": "edr", "s1": "edr", "pp": "proofpoint", "tap": "proofpoint",
-                  "mail": "email", "e-mail": "email", "zt": "zta", "zerotrust": "zta", "imperva": "waf"}
+                  "mail": "email", "e-mail": "email", "zt": "zta", "zerotrust": "zta", "imperva": "waf",
+                  "beyondtrust": "pra", "bt-pra": "pra"}
 MAILGUARD = ("email", "dns")
 # Modules that generate a lot of network traffic (DNS queries, Internet probes): at most max_parallel_network
 # of them run at the same time (default 1), so their peaks never add up. The others (API reads of a few
@@ -165,6 +167,17 @@ modules:
       # password_types: [partner, customer]                  # user types expected to use IAS passwords
       # inactive_days: 90
       # password_max_days: 365
+
+  # BeyondTrust Privileged Remote Access (read-only: Configuration API GET and the session listing report)
+  # Credentials: export PRA_SITE_URL=https://<site> PRA_CLIENT_ID=... PRA_CLIENT_SECRET=...  (never in this file)
+  # API account: Command API Deny; Configuration API without Manage Vault Accounts; Session and Vault Account
+  # Activity reports; a network allow list with this machine's public address.
+  pra:
+    enabled: false
+    options:
+      csv: true
+      # session_days: 7                  # session report window
+      # inactive_days: 90
 
   # Microsoft Zero Trust Assessment (run Invoke-ZtAssessment first, then point to its folder)
   zta:

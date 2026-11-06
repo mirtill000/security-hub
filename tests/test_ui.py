@@ -8,7 +8,7 @@ from securityhub import ui
 
 
 class UiAssetsTest(unittest.TestCase):
-    PAGES = ("dns", "waf", "edr", "proofpoint", "ias", "zta", "portal")
+    PAGES = ("dns", "waf", "edr", "proofpoint", "ias", "pra", "zta", "portal")
 
     def test_includes_are_resolved(self):
         for page in self.PAGES:

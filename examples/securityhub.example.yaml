@@ -93,6 +93,17 @@ modules:
       # inactive_days: 90
       # password_max_days: 365
 
+  # BeyondTrust Privileged Remote Access (read-only: Configuration API GET and the session listing report)
+  # Credentials: export PRA_SITE_URL=https://<site> PRA_CLIENT_ID=... PRA_CLIENT_SECRET=...  (never in this file)
+  # API account: Command API Deny; Configuration API without Manage Vault Accounts; Session and Vault Account
+  # Activity reports; a network allow list with this machine's public address.
+  pra:
+    enabled: false
+    options:
+      csv: true
+      # session_days: 7                  # session report window
+      # inactive_days: 90
+
   # Microsoft Zero Trust Assessment (run Invoke-ZtAssessment first, then point to its folder)
   zta:
     enabled: false

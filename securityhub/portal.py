@@ -37,14 +37,14 @@ __version__ = "1.2.0"
 
 DATA_RE = re.compile(r'<script type="application/json" id="mg-data">(.*?)</script>', re.S)
 TITLE_RE = re.compile(r"<title>(.*?)</title>", re.S | re.I)
-TYPE_ORDER = {"email": 0, "dns": 1, "proofpoint": 2, "waf": 3, "edr": 4, "ias": 5, "zta": 6, "other": 7}
-TYPE_LABEL = {"email": "Email security", "dns": "DNS security", "waf": "Imperva Cloud WAF", "edr": "SentinelOne EDR", "proofpoint": "Proofpoint", "ias": "SAP Cloud Identity",
+TYPE_ORDER = {"email": 0, "dns": 1, "proofpoint": 2, "waf": 3, "edr": 4, "ias": 5, "pra": 6, "zta": 7, "other": 8}
+TYPE_LABEL = {"email": "Email security", "dns": "DNS security", "waf": "Imperva Cloud WAF", "edr": "SentinelOne EDR", "proofpoint": "Proofpoint", "ias": "SAP Cloud Identity", "pra": "BeyondTrust PRA",
               "zta": "Microsoft Zero Trust", "other": "Report"}
 DOMAIN_AREAS = ("email", "dns")  # reports whose rows are domains (MailGuard: one scan, two reports)
 TIER_W = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 # Data older than this (days) is flagged as stale: DNS and WAF can be assessed daily, the Zero Trust
 # Assessment is a periodic export. Override with --max-age / max_age_days in the configuration.
-MAX_AGE_DAYS = {"email": 2, "dns": 2, "proofpoint": 2, "waf": 2, "edr": 2, "ias": 2, "zta": 35}
+MAX_AGE_DAYS = {"email": 2, "dns": 2, "proofpoint": 2, "waf": 2, "edr": 2, "ias": 2, "pra": 2, "zta": 35}
 STATUS_RANK = {"bad": 0, "warn": 1, "good": 2}
 
 
@@ -65,6 +65,8 @@ def detect(payload: Optional[dict], title: str) -> str:
             return "proofpoint"
         if (payload.get("meta") or {}).get("tool") == "IASGuard":
             return "ias"
+        if (payload.get("meta") or {}).get("tool") == "PRAGuard":
+            return "pra"
         if (payload.get("meta") or {}).get("tool") == "WAFGuard" or "account_issues" in payload:
             return "waf"
         if isinstance(payload.get("results"), list) and "checks" in payload:
@@ -87,7 +89,7 @@ def summarize_assets(kind: str, payload: dict) -> dict:
     measured = [r for r in rows if (inventory.dns_measured(r) if kind in DOMAIN_AREAS else inventory.waf_measured(r))]
     avg = weighted_avg(measured, tiers)
     sev = Counter(i.get("severity") for r in rows for i in r.get("issues") or [])
-    noun = ("domains" if kind in DOMAIN_AREAS + ("proofpoint",) else "endpoints" if kind == "edr" else "users" if kind == "ias"
+    noun = ("domains" if kind in DOMAIN_AREAS + ("proofpoint",) else "endpoints" if kind == "edr" else "users" if kind == "ias" else "objects" if kind == "pra"
             else "websites")
     kpis = [[len(rows), f"{noun} assessed"], *([[len(rows) - len(measured), "not verified (errors)", "warn"]] if len(measured) < len(rows) else []),
             [sum(r.get("overall_score", 0) >= 80 for r in rows), "well protected (80+)", "pass"],
@@ -566,6 +568,61 @@ def exec_ias(payload: dict) -> dict:
     return {"status": status, "kpis": kpis, "side": side,
             "trend": round(sum(deltas) / len(deltas), 1) if deltas else None, "actions": actions, "headline": head}
 
+
+def exec_pra(payload: dict) -> dict:
+    """Privileged access outcomes: people with MFA, assets whose sessions are governed and recorded, vendor
+    accounts under control, API accounts restricted."""
+    rows = payload.get("results") or []
+    tot = payload.get("totals") or {}
+    codes = lambda r: {i.get("code") for i in r.get("issues") or []}
+    kind = lambda r: r.get("account_id")
+    people = [r for r in rows if kind(r) in ("user", "vendor_user")]
+    assets = [r for r in rows if kind(r) == "asset"]
+    no_mfa = [r for r in people if codes(r) & {"ADMIN_NO_MFA", "VENDOR_NO_MFA", "USER_NO_MFA"}]
+    admin_nomfa = [r for r in people if "ADMIN_NO_MFA" in codes(r)]
+    vendor_risk = [r for r in people if codes(r) & {"VENDOR_NO_MFA", "VENDOR_NO_EXPIRY"}]
+    ungoverned = [r for r in assets if codes(r) & {"ASSET_RECORDING_OFF", "ASSET_NO_POLICY"}]
+    api_open = [r for r in rows if "API_NO_IP_WRITE" in codes(r)]
+    kpis = []
+    if people and not tot.get("limited"):
+        kpis.append(_kpi("pra_mfa", "People who sign in with MFA (users and vendors)", _pct(len(people) - len(no_mfa), len(people)), "%",
+                         f"{len(people) - len(no_mfa)} of {len(people)} enabled accounts", 100, area="pra", hash_="#/domains?profile=critical"))
+    if assets and not tot.get("limited"):
+        kpis.append(_kpi("pra_recorded", "Assets under a policy that records sessions", _pct(len(assets) - len(ungoverned), len(assets)), "%",
+                         f"{len(assets) - len(ungoverned)} of {len(assets)} assets", 100, area="pra", hash_="#/domains?comp=governed_access:fail"))
+    kpis.append(_kpi("pra_vendor", "Vendor accounts without MFA or expiration", len(vendor_risk), "",
+                     "external access to privileged systems", 0, higher_is_better=False, area="pra", hash_="#/domains?account=Vendor%20user"))
+    s = tot.get("sessions") or {}
+    side = [["Administrators without MFA", str(len(admin_nomfa)), "bad" if admin_nomfa else "good"],
+            ["Vendor accounts without MFA or expiration", str(len(vendor_risk)), "bad" if vendor_risk else "good"],
+            ["Assets without recording or policy", str(len(ungoverned)), "warn" if ungoverned else "good"],
+            ["API accounts with write access and no allow list", str(len(api_open)), "bad" if api_open else "good"]]
+    if s:
+        side.append([f"Sessions not recorded ({s.get('days')} days)", f"{s.get('unrecorded', 0)} of {s.get('total', 0)}",
+                     "warn" if s.get("unrecorded") else "good"])
+    score = weighted_avg(rows, payload.get("tiers") or TIER_W)
+    deltas = [r["change"]["score_delta"] for r in rows if r.get("change") and r["change"].get("score_delta") is not None]
+    head = None
+    if admin_nomfa:
+        head = (100, f"{len(admin_nomfa)} PRA administrator{'s' if len(admin_nomfa) != 1 else ''} without MFA")
+    elif api_open:
+        head = (90, f"{len(api_open)} PRA API account{'s' if len(api_open) != 1 else ''} with write access usable from any address")
+    elif vendor_risk:
+        head = (_pct(len(vendor_risk), len(people)), f"{len(vendor_risk)} vendor account{'s' if len(vendor_risk) != 1 else ''} without MFA or expiration")
+    actions = _asset_actions("pra", payload, rows)
+    for i in payload.get("account_issues") or []:
+        if i.get("severity") in ("critical", "warning"):
+            actions.append({"area": "pra", "code": i.get("code"), "severity": i["severity"], "title": i.get("message"),
+                            "rec": i.get("recommendation"), "count": None, "share": None, "critical_tier": 0,
+                            "impact": 40 if i["severity"] == "critical" else 10, "hash": "#/policies"})
+    lead = ("ADMIN_NO_MFA", "API_NO_IP_WRITE", "VENDOR_NO_MFA")
+    actions.sort(key=lambda a: (a["code"] not in lead, -a["impact"], a["severity"] != "critical", str(a["code"])))
+    status = _status(score, bool(admin_nomfa or api_open or vendor_risk or ungoverned))
+    if (admin_nomfa or api_open) and status != "unknown":
+        status = "bad"
+    return {"status": status, "kpis": kpis, "side": side,
+            "trend": round(sum(deltas) / len(deltas), 1) if deltas else None, "actions": actions, "headline": head}
+
 def exec_zta(payload: dict) -> dict:
     tests = payload.get("tests") or []
     info = payload.get("tenant_info")
@@ -649,6 +706,8 @@ def page_parts(kind: str) -> Tuple[str, str, str]:
         from .scanners.proofpoint import report as m
     elif kind == "ias":
         from .scanners.sap_ias import report as m
+    elif kind == "pra":
+        from .scanners.pra import report as m
     elif kind == "zta":
         from .scanners import zero_trust as m
     else:
@@ -714,14 +773,14 @@ def load_report(path: str, idx: int, keep: bool = True) -> dict:
     if payload is not None:
         try:
             summary = (summarize_zta(payload) if kind == "zta" else
-                       summarize_assets(kind, payload) if kind in ("email", "dns", "waf", "edr", "proofpoint", "ias") else summary)
+                       summarize_assets(kind, payload) if kind in ("email", "dns", "waf", "edr", "proofpoint", "ias", "pra") else summary)
         except Exception as e:  # never fail the hub because of one report
             print(f"Warning: summary of {os.path.basename(path)} not available ({type(e).__name__}: {e})", file=sys.stderr)
     summary["exec"] = None
-    if payload is not None and kind in ("email", "dns", "waf", "edr", "proofpoint", "ias", "zta"):
+    if payload is not None and kind in ("email", "dns", "waf", "edr", "proofpoint", "ias", "pra", "zta"):
         try:
             summary["exec"] = {"email": exec_email, "dns": exec_dns, "waf": exec_waf, "edr": exec_edr, "proofpoint": exec_proofpoint,
-                               "ias": exec_ias, "zta": exec_zta}[kind](payload)
+                               "ias": exec_ias, "pra": exec_pra, "zta": exec_zta}[kind](payload)
         except Exception as e:
             print(f"Warning: executive metrics of {os.path.basename(path)} not available ({type(e).__name__}: {e})", file=sys.stderr)
     if not summary.get("generated"):

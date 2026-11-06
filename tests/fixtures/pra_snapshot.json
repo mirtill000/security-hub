@@ -1,0 +1,423 @@
+{
+ "tool": "PRAGuard 1.0.0",
+ "vendor": "BeyondTrust",
+ "site": "https://access.contoso.example",
+ "collected": "2026-11-01T06:00:00+00:00",
+ "self_client_id": "cid-securityhub",
+ "errors": [],
+ "security_providers": [
+  {
+   "id": 1,
+   "type": "local",
+   "name": "Local",
+   "enabled": true,
+   "user_authentication": true
+  },
+  {
+   "id": 2,
+   "type": "saml",
+   "name": "Entra ID",
+   "enabled": true,
+   "user_authentication": true
+  }
+ ],
+ "users": [
+  {
+   "id": 1,
+   "username": "breakglass",
+   "public_display_name": "Break glass",
+   "security_provider_id": 1,
+   "two_factor_required": false,
+   "two_factor_type": "optional",
+   "two_factor_enabled": false,
+   "fido2_credential_count": 0,
+   "enabled": true,
+   "last_authentication": "2026-10-20T08:00:00Z",
+   "failed_logins": 0,
+   "created_at": "2024-01-01T00:00:00Z",
+   "perm_admin": true,
+   "perm_vault": true,
+   "perm_set_passwords": true,
+   "perm_endpoint_automation": "not_allowed",
+   "perm_access_allowed": "full_support"
+  },
+  {
+   "id": 2,
+   "username": "anna.rossi@contoso.example",
+   "public_display_name": "Anna Rossi",
+   "security_provider_id": 2,
+   "two_factor_required": false,
+   "two_factor_type": "optional",
+   "two_factor_enabled": false,
+   "fido2_credential_count": 0,
+   "enabled": true,
+   "last_authentication": "2026-10-31T08:00:00Z",
+   "failed_logins": null,
+   "created_at": "2025-01-01T00:00:00Z",
+   "perm_admin": true,
+   "perm_vault": false,
+   "perm_set_passwords": false,
+   "perm_endpoint_automation": "not_allowed",
+   "perm_access_allowed": "full_support"
+  },
+  {
+   "id": 3,
+   "username": "ops.local",
+   "public_display_name": "Ops",
+   "security_provider_id": 1,
+   "two_factor_required": false,
+   "two_factor_type": "optional",
+   "two_factor_enabled": false,
+   "fido2_credential_count": 0,
+   "enabled": true,
+   "last_authentication": "2026-05-01T08:00:00Z",
+   "failed_logins": 7,
+   "created_at": "2025-01-01T00:00:00Z",
+   "perm_admin": false,
+   "perm_vault": false,
+   "perm_set_passwords": false,
+   "perm_endpoint_automation": "not_allowed",
+   "perm_access_allowed": "full_support"
+  },
+  {
+   "id": 4,
+   "username": "new.local",
+   "public_display_name": "New",
+   "security_provider_id": 1,
+   "two_factor_required": true,
+   "two_factor_type": "require_totp",
+   "two_factor_enabled": true,
+   "fido2_credential_count": 0,
+   "enabled": true,
+   "last_authentication": null,
+   "failed_logins": 0,
+   "created_at": "2026-05-01T00:00:00Z",
+   "perm_admin": false,
+   "perm_vault": false,
+   "perm_set_passwords": false,
+   "perm_endpoint_automation": "not_allowed",
+   "perm_access_allowed": "full_support"
+  },
+  {
+   "id": 5,
+   "username": "left@contoso.example",
+   "public_display_name": "Left",
+   "security_provider_id": 2,
+   "enabled": false
+  }
+ ],
+ "group_policies": [
+  {
+   "id": 10,
+   "name": "Admins",
+   "perm_access_allowed": true,
+   "access_perm_status": "defined",
+   "two_factor_required": true,
+   "two_factor_type": "require_fido2",
+   "perm_protocol_tunnel": true
+  },
+  {
+   "id": 11,
+   "name": "Vendors - Acme",
+   "perm_access_allowed": true,
+   "access_perm_status": "defined",
+   "two_factor_required": false,
+   "two_factor_type": "optional",
+   "perm_protocol_tunnel": false
+  }
+ ],
+ "vendors": [
+  {
+   "id": 20,
+   "name": "Acme Automation",
+   "default_policy": 11,
+   "account_expiration": null,
+   "user_approval_enabled": false,
+   "network_restrictions": []
+  },
+  {
+   "id": 21,
+   "name": "Globex",
+   "default_policy": 11,
+   "account_expiration": 30,
+   "user_approval_enabled": true,
+   "network_restrictions": [
+    "198.51.100.0/24"
+   ]
+  }
+ ],
+ "vendor_users": [
+  {
+   "id": 30,
+   "username": "acme.tech",
+   "public_display_name": "Acme Tech",
+   "account_expiration": null,
+   "enabled": true,
+   "last_authenticated_date": "2026-10-28T10:00:00Z",
+   "vendor_administrator": true,
+   "is_approved": true,
+   "is_expired": false,
+   "two_factor_enabled": false,
+   "fido2_credential_count": 0,
+   "vendor_id": 20,
+   "vendor": "Acme Automation"
+  },
+  {
+   "id": 31,
+   "username": "globex.eng",
+   "public_display_name": "Globex Eng",
+   "account_expiration": "2026-12-01T00:00:00Z",
+   "enabled": true,
+   "last_authenticated_date": "2026-06-01T10:00:00Z",
+   "vendor_administrator": false,
+   "is_approved": true,
+   "is_expired": false,
+   "two_factor_enabled": true,
+   "fido2_credential_count": 0,
+   "vendor_id": 21,
+   "vendor": "Globex"
+  }
+ ],
+ "jump_policies": [
+  {
+   "id": 40,
+   "display_name": "Production - approval",
+   "code_name": "prod",
+   "schedule_enabled": true,
+   "recordings_disabled": false,
+   "approval_required": true,
+   "two_factor_challenge_required": true,
+   "context_requirement": "ticket_id",
+   "session_start_notification": true
+  },
+  {
+   "id": 41,
+   "display_name": "Lab - no recording",
+   "code_name": "lab",
+   "schedule_enabled": false,
+   "recordings_disabled": true,
+   "approval_required": false,
+   "two_factor_challenge_required": false,
+   "context_requirement": "none",
+   "session_start_notification": false
+  }
+ ],
+ "gateways": [
+  {
+   "id": 50,
+   "name": "GW-DC1",
+   "platform": "linux-x86",
+   "enabled": true,
+   "connected": true,
+   "clustered": true,
+   "jzp_enabled": false,
+   "jzp_client_address_restrictions_type": null
+  },
+  {
+   "id": 51,
+   "name": "GW-PLANT",
+   "platform": "windows-x86",
+   "enabled": true,
+   "connected": false,
+   "clustered": false,
+   "jzp_enabled": true,
+   "jzp_client_address_restrictions_type": "allow_all"
+  }
+ ],
+ "assets": [
+  {
+   "id": 60,
+   "name": "sap-prd-app01",
+   "hostname": "10.0.1.10",
+   "jump_group_type": "shared",
+   "jump_group_id": 1,
+   "jump_policy_id": 40,
+   "session_policy_id": 1,
+   "jumpoint_id": 50,
+   "tag": "SAP",
+   "protocol": "ssh",
+   "ignore_untrusted": null,
+   "tunnel_type": null,
+   "type": "shell-jump"
+  },
+  {
+   "id": 61,
+   "name": "plc-gateway",
+   "hostname": "10.20.0.5",
+   "jump_group_type": "shared",
+   "jump_group_id": 2,
+   "jump_policy_id": 41,
+   "session_policy_id": 1,
+   "jumpoint_id": 51,
+   "tag": "OT",
+   "protocol": "telnet",
+   "ignore_untrusted": null,
+   "tunnel_type": null,
+   "type": "shell-jump"
+  },
+  {
+   "id": 62,
+   "name": "dc01",
+   "hostname": "dc01.contoso.local",
+   "jump_group_type": "shared",
+   "jump_group_id": 1,
+   "jump_policy_id": null,
+   "session_policy_id": 1,
+   "jumpoint_id": 50,
+   "tag": "AD",
+   "protocol": null,
+   "ignore_untrusted": true,
+   "tunnel_type": null,
+   "type": "remote-rdp"
+  },
+  {
+   "id": 63,
+   "name": "sql-prod",
+   "hostname": "10.0.2.20",
+   "jump_group_type": "personal",
+   "jump_group_id": 3,
+   "jump_policy_id": 40,
+   "session_policy_id": 1,
+   "jumpoint_id": 50,
+   "tag": "",
+   "protocol": null,
+   "ignore_untrusted": null,
+   "tunnel_type": "mssql",
+   "type": "protocol-tunnel-jump"
+  }
+ ],
+ "api_accounts": [
+  {
+   "id": 70,
+   "name": "SecurityHub",
+   "enabled": true,
+   "ip_addresses": "203.0.113.7/32",
+   "client_id": "cid-securityhub",
+   "failed_login_attempts": 0,
+   "perm_command": "deny",
+   "perm_reporting_support": true,
+   "perm_reporting_license": true,
+   "perm_reporting_vault": true,
+   "perm_reporting_jump_item": true,
+   "perm_reporting_duplicate_jump_client": false,
+   "perm_reporting_syslog": true,
+   "perm_backup": false,
+   "perm_vault_backup": false,
+   "perm_ecm": false,
+   "perm_scim": false,
+   "perm_configuration": true,
+   "perm_configuration_vault_account": false
+  },
+  {
+   "id": 71,
+   "name": "Old ITSM integration",
+   "enabled": true,
+   "ip_addresses": "",
+   "client_id": "cid-itsm",
+   "failed_login_attempts": 0,
+   "perm_command": "full_access",
+   "perm_reporting_support": true,
+   "perm_reporting_license": false,
+   "perm_reporting_vault": false,
+   "perm_reporting_jump_item": false,
+   "perm_reporting_duplicate_jump_client": false,
+   "perm_reporting_syslog": false,
+   "perm_backup": true,
+   "perm_vault_backup": true,
+   "perm_ecm": false,
+   "perm_scim": false,
+   "perm_configuration": true,
+   "perm_configuration_vault_account": true
+  }
+ ],
+ "vault_accounts": [
+  {
+   "id": 80,
+   "type": "windows_domain",
+   "name": "CONTOSO\\svc-backup",
+   "personal": false,
+   "account_group_id": 1,
+   "account_policy": "no-rotation"
+  },
+  {
+   "id": 81,
+   "type": "ssh",
+   "name": "root@sap-prd-app01",
+   "personal": false,
+   "account_group_id": 1,
+   "account_policy": "daily"
+  }
+ ],
+ "vault_policies": [
+  {
+   "id": 90,
+   "name": "No rotation",
+   "code_name": "no-rotation",
+   "auto_rotate_credentials": false,
+   "allow_simultaneous_checkout": true,
+   "scheduled_password_rotation": false,
+   "maximum_password_age": null
+  },
+  {
+   "id": 91,
+   "name": "Daily",
+   "code_name": "daily",
+   "auto_rotate_credentials": true,
+   "allow_simultaneous_checkout": false,
+   "scheduled_password_rotation": true,
+   "maximum_password_age": 1
+  }
+ ],
+ "vault_roles": [
+  {
+   "group_policy_id": 11,
+   "group_policy": "Vendors - Acme",
+   "account_id": 80,
+   "role": "inject_and_checkout"
+  },
+  {
+   "group_policy_id": 10,
+   "group_policy": "Admins",
+   "account_id": 81,
+   "role": "inject"
+  }
+ ],
+ "sessions": [
+  {
+   "lsid": "a",
+   "start": "2026-10-30T09:00:00Z",
+   "end": "2026-10-30T10:00:00Z",
+   "duration": "01:00:00",
+   "jump_group": "Prod",
+   "jump_group_type": "shared",
+   "gateway": "GW-DC1",
+   "endpoint": "sap-prd-app01",
+   "owner": "anna.rossi@contoso.example",
+   "users": [
+    "anna.rossi@contoso.example"
+   ],
+   "file_transfers": 0,
+   "recorded": true
+  },
+  {
+   "lsid": "b",
+   "start": "2026-10-31T22:00:00Z",
+   "end": "2026-10-31T23:30:00Z",
+   "duration": "01:30:00",
+   "jump_group": "OT",
+   "jump_group_type": "shared",
+   "gateway": "GW-PLANT",
+   "endpoint": "plc-gateway",
+   "owner": "acme.tech",
+   "users": [
+    "acme.tech"
+   ],
+   "file_transfers": 3,
+   "recorded": false
+  }
+ ],
+ "session_window": {
+  "start": "2026-10-25T06:00:00+00:00",
+  "days": 7
+ }
+}

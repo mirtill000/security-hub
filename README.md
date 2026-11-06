@@ -1,6 +1,6 @@
 # Security Hub
 
-Monitoraggio della **security posture** su più aree (e-mail, DNS, Proofpoint, WAF, EDR, identità SAP, Zero Trust), con un unico comando e un unico portale:
+Monitoraggio della **security posture** su più aree (e-mail, DNS, Proofpoint, WAF, EDR, identità SAP, accessi privilegiati, Zero Trust), con un unico comando e un unico portale:
 
 | Area | Modulo | Cosa valuta | Sorgente dati |
 |------|--------|-------------|---------------|
@@ -10,6 +10,7 @@ Monitoraggio della **security posture** su più aree (e-mail, DNS, Proofpoint, W
 | **Proofpoint** | `securityhub proofpoint` (PPGuard) | Posta che passa davvero da Proofpoint (MX, MX di bypass, consegna diretta a Microsoft 365, SPF) e, da TAP, minacce consegnate, click malevoli permessi, URL Defense, Very Attacked People e top clicker | DNS pubblico + API TAP (sola lettura) o snapshot JSON |
 | **EDR** | `securityhub edr` (EDRGuard) | SentinelOne: salute e versione degli agent, Protect vs Detect, anti-tamper, motori, snapshot, minacce aperte e SLA, esclusioni rischiose, copertura rispetto all'inventario | API SentinelOne v2.1 (sola lettura) o snapshot JSON |
 | **Identità SAP** | `securityhub sap-ias` (IASGuard) | SAP Cloud Identity Services: utenti con password IAS locale invece dell'IdP aziendale, privilegiati con password, MFA, igiene password, account inattivi, scaduti o con e-mail condivisa | SCIM 2.0 (sola lettura) o snapshot JSON |
+| **Accessi privilegiati** | `securityhub pra` (PRAGuard) | BeyondTrust PRA: MFA di utenti, amministratori e fornitori, scadenza delle utenze fornitori, asset senza policy o registrazione, Telnet e certificati RDP non verificati, gateway, account API senza restrizione di rete o con permessi di scrittura, rotazione e checkout del vault, sessioni non registrate | Configuration API (solo GET) e Reporting API |
 | **Zero Trust** | `securityhub zta` (ZTAGuard) | Risultati del Microsoft Zero Trust Assessment per pilastro, priorità, quick win | `ZeroTrustAssessmentReport.json` |
 | **Portale** | `securityhub portal` (GuardHub) | Un solo file HTML con stato per area, KPI, piano d'azione trasversale, **vista per asset**, trend storici e i report navigabili | Report HTML generati dai moduli |
 
@@ -363,6 +364,37 @@ pagina **Directory** lo dichiara. Gli account disattivati sono contati ma non va
 il report elenca solo quelli con rilievi, mentre i totali coprono tutti. Nel portale l'area è *At risk* se un
 utente privilegiato ha una password IAS locale.
 
+## BeyondTrust PRA
+
+`securityhub pra` (alias `beyondtrust`, modulo `pra` nella configurazione) legge il site PRA e valuta **un oggetto
+per riga**: utenti, utenti dei fornitori, asset (jump item), gateway, account API e account del vault, con i controlli
+che valgono per il suo tipo. Le impostazioni globali (security provider, group policy, vendor group) e le statistiche
+delle sessioni sono rilievi a livello di site.
+
+```bash
+export PRA_SITE_URL=https://<site> PRA_CLIENT_ID=... PRA_CLIENT_SECRET=...
+securityhub pra -o pra.html --json --csv --session-days 7
+securityhub pra --save-raw pra.json           # snapshot senza e-mail, IP degli utenti, password o registrazioni
+```
+
+**Account API** (/login > Management > API Configuration): Command API *Deny*; Configuration API *Allow Access* senza
+*Manage Vault Accounts*; Reporting API: report delle sessioni e attività del vault; *Network Restrictions* con l'IP
+pubblico della macchina. La Configuration API di PRA non ha un'opzione di sola lettura: il tool garantisce la sola
+lettura da sé (solo `GET` su un elenco chiuso di endpoint, più la richiesta del token OAuth), e i test lo verificano.
+Il tool segnala anche i permessi del proprio account che non usa.
+
+| Controllo | Peso | Su | Cosa verifica |
+|-----------|-----:|----|---------------|
+| `authentication` | 30 | utenti, fornitori, account API | MFA (non per gli utenti SAML, gestita dall'IdP), amministratori locali, account API senza allow list di rete |
+| `privileges` | 15 | utenti, fornitori, account API, vault | Amministratori, permessi API di scrittura o sensibili, credenziali del vault visibili (checkout) |
+| `lifecycle` | 15 | utenti, fornitori, vault | Inattivi o mai usati, fornitori senza scadenza, rotazione delle password del vault |
+| `access_policy` | 25 | asset | Asset senza asset policy, sessioni non registrate, nessuna approvazione, nessun orario, nessun MFA all'avvio, asset personali |
+| `exposure` | 15 | asset, gateway | Telnet, RDP che ignora certificati non attendibili, tunnel, gateway offline o senza cluster, proxy senza restrizioni |
+
+Nel portale l'area è *At risk* se c'è un amministratore senza MFA o un account API con permessi di scrittura
+utilizzabile da qualunque indirizzo. Su PRA SaaS gli aggiornamenti del software sono gestiti da BeyondTrust, quindi
+la versione non è valutata (richiederebbe la Command API).
+
 ## SentinelOne EDR
 
 `securityhub edr` (alias `s1`, `sentinelone`) legge la console SentinelOne con le API v2.1 **in sola lettura** e
@@ -438,13 +470,14 @@ securityhub/
   ui/                  design system condiviso di report e portale (assemblato in file HTML singoli e offline)
     base.css             token, layout e componenti comuni a tutte le pagine
     core.js, theme.js, report-core.js, asset-report.js   funzioni condivise (tutte le pagine / i 3 report / DNS e WAF)
-    dns|waf|edr|proofpoint|ias|zta|portal.css|js, report.html, portal.html   parti specifiche
+    dns|waf|edr|proofpoint|ias|pra|zta|portal.css|js, report.html, portal.html   parti specifiche
   scanners/
     dns_email/         MailGuard DNS: constants, models, domains, dnsclient, rdap, fetch,
                        analyzer + checks_auth / checks_transport / checks_exposure / scoring,
                        lookalikes, dmarc_reports, remediation, baseline, inputs, exports, report, cli
     waf/               WAFGuard: constants, models, api, probe, checks, scoring, remediation, analysis, exports, report, cli
     proofpoint/        PPGuard (Proofpoint): constants, models, routing (DNS), api (TAP), checks, analysis, exports, report, cli
+    pra/               PRAGuard (BeyondTrust PRA): constants, models, api, analysis, exports, report, cli
     sap_ias/           IASGuard (SAP Cloud Identity): constants, models, api (SCIM), analysis, exports, report, cli
     edr/               EDRGuard (SentinelOne): constants, models, api, checks, analysis, exports, report, cli
     zero_trust.py      ZTAGuard (Microsoft)
@@ -459,7 +492,7 @@ contenuto del file indicato.
 ## Note di sicurezza
 
 - Tutti i moduli sono **in sola lettura**: WAFGuard usa solo endpoint list/status/get, EDRGuard solo GET (token Viewer), PPGuard solo le API SIEM e People di TAP.
-- Le credenziali (Imperva, SentinelOne, Proofpoint, SAP IAS) non sono accettate nel file di configurazione: variabili d'ambiente o file di chiave.
+- Le credenziali (Imperva, SentinelOne, Proofpoint, SAP IAS, BeyondTrust) non sono accettate nel file di configurazione: variabili d'ambiente o file di chiave.
 - I CSV sono protetti da formula injection; i dati inseriti nei report HTML sono escapati e le pagine hanno una CSP restrittiva.
 - Il fetch MTA-STS è protetto da SSRF (solo IP pubblici, salvo `--allow-private`).
 - `reports/`, snapshot e `securityhub.yaml` sono in `.gitignore`: descrivono la tua posture e non vanno pubblicati.
