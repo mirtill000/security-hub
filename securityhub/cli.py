@@ -2,6 +2,7 @@
 
     securityhub run      [-c securityhub.yaml]    run every enabled module, update portal + posture.json
     securityhub status   <output_dir|reports...>  print the current posture (or --json)
+    securityhub doctor   [-c securityhub.yaml]    check credentials, APIs and inputs of every module (read-only)
     securityhub init     [securityhub.yaml]       write an example configuration
     securityhub email    <domains> [options]      e-mail security: MX, SPF, DKIM, DMARC... (MailGuard)
     securityhub dns      <domains> [options]      DNS security: DNSSEC, CAA, takeover, AXFR... (MailGuard)
@@ -50,6 +51,7 @@ def _usage() -> str:
              "usage: securityhub <command> [options]", "", "Commands:",
              "  run        Run the enabled modules from a configuration file, update the portal and posture.json",
              "  status     Print the current posture from an output folder or from reports",
+             "  doctor     Check credentials, API access and inputs of every configured module (read-only)",
              "  init       Write an example configuration file"]
     lines += [f"  {k:<10} {v[2]}" for k, v in TOOLS.items()]
     lines += ["", "Run 'securityhub <command> --help' for the options of a command."]
@@ -131,6 +133,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return _status_cmd(rest)
     if cmd == "init":
         return _init_cmd(rest)
+    if cmd == "doctor":
+        from . import doctor
+        return doctor.main(rest)
     if cmd not in TOOLS:
         print(f"securityhub: unknown command '{argv[0]}'\n\n{_usage()}", file=sys.stderr)
         return EXIT_USAGE

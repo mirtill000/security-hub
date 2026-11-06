@@ -106,6 +106,79 @@ def area_score(kind: str, payload: dict) -> Optional[float]:
     return weighted_avg([r for r in rows if _scored(kind, r)], payload.get("tiers") or TIER_W)
 
 
+# ---------------------------------------------------------------------------
+# Two figures per area: hygiene (how well things are configured) and active exposure (what an attacker can use,
+# or is using, right now). The overall area score keeps both; these split it so a configuration effort and an
+# incident do not hide each other.
+# ---------------------------------------------------------------------------
+
+# Findings that are an active exposure: threats that reached people or systems, clicks allowed, accounts that can be
+# taken over without MFA, systems reachable around their protection, names that can be hijacked.
+EXPOSURE_CODES: Dict[str, set] = {
+    "email": {"DMARC_MISSING", "DMARC_NONE", "DMARC_INVALID", "SPF_PASS_ALL"},
+    "dns": {"TAKEOVER_UNREGISTERED", "TAKEOVER_EXPIRED", "TAKEOVER_LAME_NS", "MX_DANGLING", "AXFR_OPEN", "DNSSEC_BOGUS",
+            "DOMAIN_EXPIRED", "LOOKALIKE_FRESH"},
+    "waf": {"SITE_BYPASS", "ORIGIN_EXPOSED", "DNS_NOT_ROUTED", "WAF_NO_POLICY", "WAF_POLICY_DISABLED", "WAF_RULE_IGNORED",
+            "ALLOW_BROAD_IP", "CERT_EXPIRED"},
+    "edr": {"THREAT_ACTIVE", "AGENT_DISABLED", "COVERAGE_GAP"},
+    "proofpoint": {"THREAT_DELIVERED", "CLICK_PERMITTED", "SAFELIST_DELIVERY", "IMPOSTOR_DELIVERED", "CLICK_REPEAT",
+                   "POD_SPOOF_DELIVERED", "MAIL_BOMB_TARGETED", "BEC_VIP_TARGETED_RISK", "TR_PULLED_AFTER_READ"},
+    "ias": {"PASSWORD_NO_MFA", "PASSWORD_LOGIN_PRIVILEGED", "EXPIRED_ACTIVE"},
+    "pra": {"ADMIN_NO_MFA", "USER_NO_MFA", "VENDOR_NO_MFA", "API_NO_IP_WRITE"},
+}
+# Checks that measure exposure, not configuration: left out of the hygiene figure.
+EXPOSURE_CHECKS: Dict[str, set] = {"dns": {"takeover", "axfr"}, "edr": {"threats"},
+                                   "proofpoint": {"threats", "clicks", "rewrite", "people"}}
+
+
+def hygiene_exposure(kind: str, payload: dict) -> Optional[dict]:
+    """hygiene: tier-weighted score of the configuration checks only, without the caps set by exposures;
+    exposure: assessed items with at least one exposure finding, plus organization-level exposures."""
+    codes = EXPOSURE_CODES.get(kind)
+    if codes is None:
+        return None
+    rows = [r for r in payload.get("results") or [] if _scored(kind, r)]
+    skip = EXPOSURE_CHECKS.get(kind, set())
+    tiers = payload.get("tiers") or TIER_W
+    hyg_rows = []
+    for r in rows:
+        comps = {c: v for c, v in ((r.get("score_breakdown") or {}).get("components") or {}).items() if c not in skip}
+        top = sum(float(v.get("max") or 0) for v in comps.values())
+        if top:
+            hyg_rows.append({"tier": r.get("tier", "medium"), "overall_score": 100 * sum(float(v.get("got") or 0) for v in comps.values()) / top})
+    exposed = [r for r in rows if {i.get("code") for i in r.get("issues") or []} & codes]
+    by_code: Counter = Counter(i.get("code") for r in rows for i in r.get("issues") or [] if i.get("code") in codes)
+    org = [i for i in payload.get("account_issues") or [] if i.get("code") in codes]
+    hyg = weighted_avg(hyg_rows, tiers)
+    return {"hygiene": round(hyg) if hyg is not None else None, "hygiene_items": len(hyg_rows),
+            "exposed": len(exposed), "assessed": len(rows), "exposed_pct": _pct(len(exposed), len(rows)),
+            "org_exposures": [{"code": i.get("code"), "message": i.get("message")} for i in org[:10]],
+            "by_code": by_code.most_common(8)}
+
+
+NOT_EVALUABLE = {"unknown", "dns_error"}
+
+
+def coverage(kind: str, payload: dict) -> dict:
+    """How much of an area was really measured: items scored, checks that could not be evaluated, API errors."""
+    rows = payload.get("results") or []
+    missing: Counter = Counter()
+    for r in rows:
+        for c, v in (r.get("checks") or {}).items():
+            status = v.get("status") if isinstance(v, dict) else None
+            if status in NOT_EVALUABLE:
+                missing[c] += 1
+        for c in ("spf", "dkim", "dmarc", "mta_sts", "tls_rpt", "dnssec", "caa", "takeover", "axfr"):   # MailGuard rows
+            v = r.get(c)
+            if isinstance(v, dict) and v.get("status") in NOT_EVALUABLE:
+                missing[c] += 1
+    issues = payload.get("account_issues") or []
+    return {"items": len(rows), "scored": sum(1 for r in rows if _scored(kind, r)),
+            "not_evaluable": sum(missing.values()), "not_evaluable_by_check": dict(missing.most_common(10)),
+            "api_errors": [i.get("message") for i in issues if str(i.get("code") or "").endswith("API_ERROR")][:10],
+            "not_configured": [i.get("message") for i in issues if str(i.get("code") or "").endswith("NOT_CONFIGURED")]}
+
+
 def summarize_assets(kind: str, payload: dict) -> dict:
     rows = payload.get("results") or []
     tiers = payload.get("tiers") or TIER_W
@@ -137,6 +210,7 @@ def summarize_assets(kind: str, payload: dict) -> dict:
                     "hash": "#/domains?d=" + str(r.get("domain"))})
     diff = payload.get("diff") or {}
     return {"score": round(avg) if avg is not None else None, "kpis": kpis, "top": top,
+            "split": hygiene_exposure(kind, payload), "coverage": coverage(kind, payload),
             "subtitle": f"{len(rows)} {noun}", "generated": (payload.get("meta") or {}).get("generated", ""),
             "delta": {"improved": diff.get("improved"), "worsened": diff.get("worsened")} if diff else None}
 
@@ -929,6 +1003,13 @@ def split_history(reports: List[dict]) -> Tuple[List[dict], dict]:
             if r.get("score") is not None:
                 series.setdefault(key, {"id": key, "key": "score", "label": f"{r['label']} score", "unit": "/100", "area": kind,
                                         "subject": subj, "target": 75, "points": []})["points"].append([r["date"], r["score"]])
+            sp = r.get("split") or {}
+            for key, label, unit, target, val in (("hygiene", "hygiene", "/100", 75, sp.get("hygiene")),
+                                                  ("exposed", "items with an active exposure", "", 0, sp.get("exposed"))):
+                if val is not None:
+                    sid = f"{key}|{kind}|{subj}"
+                    series.setdefault(sid, {"id": sid, "key": key, "label": f"{r['label']} {label}", "unit": unit, "area": kind,
+                                            "subject": subj, "target": target, "points": []})["points"].append([r["date"], val])
             for k in (r.get("exec") or {}).get("kpis", []):
                 if k.get("value") is None:
                     continue
@@ -1048,7 +1129,7 @@ HUB_MARKERS = re.compile(r"(__TITLE__|__CSS__|__JS__|__DATA__|__REPORTS__)")
 
 def build_hub(reports: List[dict], out: str, title: str, history: Optional[dict] = None,
               max_age: Optional[Dict[str, float]] = None, failed: Optional[Dict[str, dict]] = None,
-              joined: Optional[dict] = None) -> int:
+              joined: Optional[dict] = None, health: Optional[dict] = None) -> int:
     """failed: area -> {"at", "error"} for the areas whose module failed in the latest run (their data is older).
 
     The page is written piece by piece (each report in turn), never built as one string: on a small device the
@@ -1059,7 +1140,7 @@ def build_hub(reports: List[dict], out: str, title: str, history: Optional[dict]
             "failed": failed or {},
             "max_age_days": {**MAX_AGE_DAYS, **(max_age or {})},
             "portfolio": portfolio(reports), "history": history or {"series": [], "runs": []},
-            "inventory": joined["inventory"], "links": joined["links"]}
+            "inventory": joined["inventory"], "links": joined["links"], "health": health or {}}
     index = [{k: v for k, v in r.items() if k not in ("html", "payload", "path")} for r in reports]
     with atomic_open(out) as f:
         for part in HUB_MARKERS.split(HUB_TEMPLATE):
@@ -1160,6 +1241,9 @@ def posture(reports: List[dict], history: Optional[dict] = None, max_age: Option
             "kpis": [{k: v for k, v in kpi.items() if k in ("key", "label", "value", "unit", "detail", "target", "trend")}
                      for kpi in ex.get("kpis", [])],
             "actions": ex.get("actions", [])[:5],
+            **({"hygiene": r["split"]["hygiene"], "exposure": {k: r["split"][k] for k in ("exposed", "assessed", "exposed_pct", "org_exposures")}}
+               if r.get("split") else {}),
+            **({"coverage": r["coverage"]} if r.get("coverage") else {}),
             **({"last_run_failed": (failed or {})[r["type"]]} if r["type"] in (failed or {}) else {}),
         })
     pf = portfolio(reports)

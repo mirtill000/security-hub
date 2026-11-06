@@ -457,6 +457,43 @@ def parse_publish(value: Any, base_dir: str) -> Optional[dict]:
     return {"dir": folder, "posture": bool(spec.get("posture", False)), "mode": mode}
 
 
+def load_health(out_dir: str) -> dict:
+    """What the Status page of the portal shows: the last `securityhub doctor` and the last run."""
+    out = {}
+    for key, name in (("doctor", "health.json"), ("run", "last_run.json")):
+        try:
+            with open(os.path.join(out_dir, name), encoding="utf-8") as f:
+                out[key] = json.load(f)
+        except (OSError, ValueError):
+            pass
+    return out
+
+
+def refresh_portal(config_path: str, out_dir: str) -> Optional[str]:
+    """Rebuild the portal from the reports already in out_dir (no module run), e.g. after `securityhub doctor`,
+    keeping the 'last run failed' banners of posture.json; publish it when the configuration says so."""
+    from . import portal
+    runs = list_runs(out_dir)
+    if not runs:
+        return None
+    cfg = load_config(config_path)
+    base_dir = os.path.dirname(os.path.abspath(config_path))
+    failed = {}
+    try:
+        with open(os.path.join(out_dir, "posture.json"), encoding="utf-8") as f:
+            failed = {a["area"]: a["last_run_failed"] for a in json.load(f).get("areas") or [] if a.get("last_run_failed")}
+    except (OSError, ValueError, KeyError):
+        pass
+    max_age = {k: float(v) for k, v in (cfg.get("max_age_days") or {}).items()}
+    reports, history = portal.collect(runs)
+    hub = os.path.join(out_dir, "security_hub.html")
+    portal.build_hub(reports, hub, str(cfg.get("title") or ""), history, max_age, failed, health=load_health(out_dir))
+    publish = parse_publish(cfg.get("publish"), base_dir)
+    if publish:
+        publish_outputs({**publish, "posture": False}, hub, "")
+    return hub
+
+
 def publish_outputs(publish: dict, hub: str, posture_file: str) -> List[str]:
     """Copy the portal (index.html) and optionally posture.json to the web folder, atomically."""
     pairs = [(hub, os.path.join(publish["dir"], "index.html"))]
@@ -725,7 +762,11 @@ def _execute(cfg, plans, out_dir, stamp, when, run_dir, parallel, max_age, fail_
     reports, history = portal.collect(list_runs(out_dir))
     hub = os.path.join(out_dir, "security_hub.html")
     joined = portal.joins(reports)   # inventory and cross-module risks: once, for the portal and posture.json
-    portal.build_hub(reports, hub, str(cfg.get("title") or ""), history, max_age, failed, joined)
+    run_info = {"id": stamp, "modules": [{"module": r.name, "exit_code": r.code, "seconds": round(r.seconds, 1),
+                                          "timed_out": r.timed_out, "error": r.error} for r in ordered]}
+    atomic_write(os.path.join(out_dir, "last_run.json"), json.dumps(run_info, indent=2))
+    portal.build_hub(reports, hub, str(cfg.get("title") or ""), history, max_age, failed, joined,
+                     health=load_health(out_dir))
     for r in reports:                # the pages and their data are no longer needed: free them before what follows
         r.pop("html", None)
         r.pop("payload", None)

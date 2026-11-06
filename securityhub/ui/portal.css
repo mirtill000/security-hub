@@ -125,3 +125,9 @@ tr[data-go] { cursor: pointer; }
 .link-fix { display: block; font-size: 12.5px; color: var(--text); margin-top: 4px; }
 .link-refs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .link-refs .btn { font-weight: 500; }
+
+/* two figures per area: hygiene (configuration) and active exposure */
+.area-split { display: flex; gap: 14px; margin: 6px 0 2px; font-size: 12.5px; }
+.area-split > div { display: grid; gap: 1px; } .area-split p { margin: 0; white-space: nowrap; }
+.area-split span { color: var(--muted); font-size: 11.5px; }
+.area-split b { font-size: 15px; } .area-split b.score { padding: 0; background: none; }

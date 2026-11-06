@@ -37,6 +37,7 @@ securityhub init                     # crea securityhub.yaml di esempio
 export IMPERVA_API_ID=12345 IMPERVA_API_KEY=xxxxxxxx
 securityhub run                      # esegue i moduli, aggiorna portale e posture.json
 securityhub status reports           # stampa la posture corrente
+securityhub doctor                   # verifica credenziali, API e input di ogni modulo (una lettura per modulo)
 ```
 
 Output di `securityhub run`:
@@ -520,3 +521,23 @@ pip install -e ".[full,dev]"
 python -m pyflakes securityhub tests
 python -m pytest -q
 ```
+
+
+## Stato e diagnostica (`securityhub doctor`)
+
+`securityhub doctor` controlla ogni modulo abilitato come lo userebbe una scansione (stesse opzioni e variabili
+d'ambiente) con **una sola chiamata in lettura**: credenziali presenti, accettate e con i permessi necessari, input
+(lista domini, `dkim.csv`, export Zero Trust) e resolver DNS. Per Proofpoint verifica TAP (SIEM, ultimo minuto),
+la Threat Protection API (solo il token: i report hanno una quota giornaliera) e la PoD Log API (apre e chiude lo
+stream). In caso di errore indica la causa probabile (credenziale rifiutata o problema di rete).
+
+Il risultato va in `<output_dir>/health.json` e nella pagina **Status** del portale, che mostra anche per ogni area:
+esito dell'ultima esecuzione, età dei dati, elementi realmente valutati, controlli non valutabili ed errori API.
+Codice di uscita 1 se un controllo fallisce (utilizzabile dal monitoraggio).
+
+## Igiene ed esposizione attiva
+
+Ogni area del portale mostra, oltre allo score complessivo, due cifre separate:
+- **Igiene** (/100): solo i controlli di configurazione, senza i limiti imposti dalle esposizioni;
+- **Esposizione attiva**: elementi con una minaccia, un click consentito, un account senza MFA, un bypass, un nome
+  dirottabile... (più quelle a livello di organizzazione). Sono anche in `posture.json` e nei trend.
