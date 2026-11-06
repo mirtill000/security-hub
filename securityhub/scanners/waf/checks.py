@@ -25,11 +25,17 @@ def _broad_cidr(value: str, v4_prefix: int, v6_prefix: int) -> bool:
     return net.prefixlen <= (v4_prefix if net.version == 4 else v6_prefix)
 
 
-# Policy exception conditions (Imperva "exceptionType"). The conditions of one exception apply TOGETHER (AND):
-# the exception is broad only when no condition narrows it to specific requests.
+# Policy exception conditions (Imperva Policies API, ExceptionsDataDto.exceptionType: GEO, IP, URL, URL_NOT_EQUALS,
+# URL_NOT_CONTAINS, URL_PREFIX, URL_SUFFIX, URL_NOT_PREFIX, URL_NOT_SUFFIX, URL_CONTAINS, CLIENT_ID, SITE_ID,
+# HTTP_PARAM, USER_AGENT, FILE_HASH). The conditions of one exception apply TOGETHER (AND): the exception is broad
+# only when no condition narrows it to specific requests. "Assets" in the console is SITE_ID; the other names are
+# kept for older or differently shaped snapshots.
 ASSET_CONDITIONS = {"SITE_ID", "ASSET_ID", "SITE", "ASSET", "ASSETS"}
 GEO_CONDITIONS = {"COUNTRY", "CONTINENT", "GEO"}
-CONDITION_LABELS = {"URL": "URL is", "IP": "IPs", "COUNTRY": "Countries", "CONTINENT": "Continents", "GEO": "Countries",
+CONDITION_LABELS = {"URL": "URL is", "URL_NOT_EQUALS": "URL is not", "URL_CONTAINS": "URL contains",
+                    "URL_NOT_CONTAINS": "URL does not contain", "URL_PREFIX": "URL starts with", "URL_NOT_PREFIX": "URL does not start with",
+                    "URL_SUFFIX": "URL ends with", "URL_NOT_SUFFIX": "URL does not end with", "HTTP_PARAM": "Parameter",
+                    "FILE_HASH": "File hash", "IP": "IPs", "COUNTRY": "Countries", "CONTINENT": "Continents", "GEO": "Countries",
                     "SITE_ID": "Assets", "ASSET_ID": "Assets", "SITE": "Assets", "ASSET": "Assets", "ASSETS": "Assets",
                     "CLIENT_ID": "Client", "CLIENT_APP_TYPE": "Client type", "PARAMETER": "Parameter", "COOKIE": "Cookie",
                     "USER_AGENT": "User agent", "HEADER": "Header", "HEADER_NAME": "Header"}
@@ -50,7 +56,9 @@ def assess_exception(exc: dict, site_id: Any = None) -> Optional[dict]:
     for t, vals in conds:
         if t in ASSET_CONDITIONS:
             continue
-        if t.startswith("URL"):
+        if t.startswith("URL_NOT"):
+            why.append("every URL except a few")  # a negated URL condition still matches almost all requests
+        elif t.startswith("URL"):
             if vals and not any(v in ANY_URL for v in vals):
                 narrowing.append(t)
             else:
@@ -372,17 +380,38 @@ def _adaptive_value(v: Any) -> Optional[bool]:
     return None
 
 
+# Imperva DDoS rule (Site Management API): activation_mode is api.threats.ddos.activation_mode.{off,auto,on,adaptive};
+# ddos_traffic_threshold is a key ("api.threats.ddos.ddos_trassic_threshold") and the number is in
+# ddos_traffic_threshold_text; ddos_adaptive_threshold(_last_update_time) is the value Imperva computes (rps, epoch ms).
+DDOS_INFO_KEYS = {"ddos_adaptive_threshold", "ddos_adaptive_threshold_last_update_time"}
+
+
+def ddos_threshold(rule: dict) -> int:
+    """The fixed DDoS threshold in requests/s (0 when unknown): numeric 'ddos_traffic_threshold' or its '_text'."""
+    for k in ("ddos_traffic_threshold", "ddos_traffic_threshold_text"):
+        try:
+            return int(float(str(rule.get(k)).strip()))
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
 def ddos_adaptive(site: dict) -> Optional[bool]:
     """True when the DDoS threshold is adaptive (Imperva tunes it from the site's own traffic), False when a fixed
-    threshold is set, None when the snapshot does not say. Read from the DDoS rule (an 'adaptive' parameter,
-    or 'adaptive' in the activation mode or threshold value) and from DDoS settings elsewhere in the site."""
+    threshold is set, None when the snapshot does not say. The activation mode is authoritative; other 'adaptive'
+    parameters and DDoS settings elsewhere in the site are a fallback."""
     r = _legacy_rules(site).get("api.threats.ddos") or {}
+    mode = f"{r.get('activation_mode') or ''} {r.get('activation_mode_text') or ''}".strip().lower()
+    if "adaptive" in mode:
+        return True
+    if mode:  # off / auto / on: a fixed threshold, whatever value Imperva computed in ddos_adaptive_threshold
+        return False
     for k, v in r.items():
-        if "adaptive" in str(k).lower():
+        if "adaptive" in str(k).lower() and k not in DDOS_INFO_KEYS:
             got = _adaptive_value(v)
             if got is not None:
                 return got
-    for k in ("activation_mode", "activation_mode_text", "ddos_traffic_threshold", "ddos_traffic_threshold_text"):
+    for k in ("ddos_traffic_threshold", "ddos_traffic_threshold_text"):
         if "adaptive" in str(r.get(k) or "").lower():
             return True
 
@@ -392,7 +421,7 @@ def ddos_adaptive(site: dict) -> Optional[bool]:
         if isinstance(node, dict):
             for k, v in node.items():
                 key = f"{path}.{k}".lower()
-                if "adaptive" in str(k).lower() and "ddos" in key and not isinstance(v, (dict, list)):
+                if "adaptive" in str(k).lower() and "ddos" in key and k not in DDOS_INFO_KEYS and not isinstance(v, (dict, list)):
                     got = _adaptive_value(v)
                     if got is not None:
                         return got
@@ -408,7 +437,7 @@ def ddos_adaptive(site: dict) -> Optional[bool]:
     found = walk({k: v for k, v in site.items() if k != "security"}, "site", 0)
     if found is not None:
         return found
-    return False if r.get("ddos_traffic_threshold") not in (None, "") else None
+    return False if ddos_threshold(r) else None
 
 
 def check_ddos(site: dict, traffic: Optional[dict] = None, origin_max: Optional[float] = None,
@@ -422,16 +451,18 @@ def check_ddos(site: dict, traffic: Optional[dict] = None, origin_max: Optional[
     mode = str(r.get("activation_mode") or "").lower()
     label = r.get("activation_mode_text") or mode.rsplit(".", 1)[-1]
     adaptive = ddos_adaptive(site) is True
-    try:
-        threshold = 0 if adaptive else int(r.get("ddos_traffic_threshold") or 0)
-    except (TypeError, ValueError):
-        threshold = 0
+    threshold = 0 if adaptive else ddos_threshold(r)
     mode_off = mode.endswith(".off") or mode == "off"
     if mode_off:
         c.issues.append(make_issue("DDOS_OFF"))
     else:
         c.got = 10
     c.data = {"mode": label, "threshold": threshold or None, "origin_max_rps": origin_max, "adaptive": adaptive}
+    if adaptive:
+        try:
+            c.data["adaptive_threshold"] = int(float(r.get("ddos_adaptive_threshold"))) or None
+        except (TypeError, ValueError):
+            pass
     if adaptive:
         # Imperva sets the threshold from the site's own traffic: comparing it with a fixed value makes no sense.
         profile = traffic_profile(traffic)
