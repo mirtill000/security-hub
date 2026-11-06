@@ -30,7 +30,7 @@ class SplitTest(TempDirTest):
         self.assertEqual(sorted(os.listdir(self.tmp)), ["dns.csv", "dns.html", "dns.json", "email.csv", "email.html", "email.json"])
         email, dns = payload(self.path("email.html")), payload(self.path("dns.html"))
         self.assertEqual(email["checks"], ["mx", "spf", "dkim", "dmarc", "mta-sts", "tls-rpt"])
-        self.assertEqual(dns["checks"], ["dkim", "dnssec", "caa", "takeover", "axfr"])
+        self.assertEqual(dns["checks"], ["dnssec", "caa", "takeover", "axfr"])
         self.assertEqual((email["meta"]["view"], dns["meta"]["view"]), ("email", "dns"))
         self.assertEqual(dns["compliance"], {})          # sender requirements belong to the e-mail report
         protos = lambda p: {p["findings"][i["code"]][1] for r in p["results"] for i in r["issues"]}

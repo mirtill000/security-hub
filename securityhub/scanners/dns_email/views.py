@@ -25,8 +25,8 @@ VIEWS: Dict[str, dict] = {
     },
     "dns": {
         "title": "DNS security posture",
-        "checks": ["dkim", "dnssec", "caa", "takeover", "axfr", "consistency", "lookalikes"],
-        "protocols": {"DKIM", "DNSSEC", "CAA", "Takeover", "Registration", "Zone transfer", "Consistency", "Lookalike"},
+        "checks": ["dnssec", "caa", "takeover", "axfr", "consistency", "lookalikes"],
+        "protocols": {"DNSSEC", "CAA", "Takeover", "Registration", "Zone transfer", "Consistency", "Lookalike"},
     },
 }
 SHARED_PROTOCOLS = {"DNS"}  # domain does not exist / name servers unreachable: true for both reports
@@ -34,11 +34,8 @@ COMBINED_TITLE = "Email and DNS security posture"
 
 # DNS score: weights of the DNS view (the e-mail view keeps the historical weights of CHECKS).
 # A control that could not be measured is left out of the maximum instead of counting as failed.
-# DKIM: the records of dkim.csv verified in DNS (a missing, mismatched or weak record lowers the DNS score);
-# 'unknown' (domain not listed) and 'na' (no mail) are not counted.
-DNS_WEIGHTS = {"dkim": 25, "dnssec": 30, "caa": 25, "takeover": 30, "axfr": 15}
+DNS_WEIGHTS = {"dnssec": 30, "caa": 25, "takeover": 30, "axfr": 15}
 DNS_POINTS = {
-    "dkim": {"valid": 1.0, "partial": 0.5, "error": 0.0, "missing": 0.0},
     "dnssec": {"valid": 1.0, "missing": 0.0, "bogus": 0.0},
     "caa": {"valid": 1.0, "warning": 0.5, "missing": 0.0},
     "takeover": {"valid": 1.0, "warning": 0.5, "error": 0.0},
@@ -118,11 +115,7 @@ def view_results(results: List[DomainResult], view: str, selected: Sequence[str]
                 setattr(v, attr, type(getattr(v, attr))(status="skipped"))
         if view != "email":
             v.dmarc_reports = DMARCReportResult()
-        dkim_guessed = view == "dns" and v.dkim.mode != "dkim.csv"
-        if dkim_guessed:  # the DNS report evaluates only the DKIM records of dkim.csv, verified in DNS
-            v.dkim = type(v.dkim)(status="skipped")
-        v.issues = [i for i in v.issues if issue_in_view(i.code, view)
-                    and not (dkim_guessed and FINDINGS.get(i.code, ("", ""))[1] == "DKIM")]
+        v.issues = [i for i in v.issues if issue_in_view(i.code, view)]
         v.change = None
         if view == "email":
             v.overall_score = scorer._calculate_score(v)

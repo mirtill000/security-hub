@@ -47,7 +47,7 @@ class CommandsTest(TempDirTest):
         code, _ = self.run_cmd("dns", fixture("domains.csv"), "-o", self.path("d.html"), "--checks", "all,axfr")
         self.assertEqual(code, EXIT_OK)
         self.assertEqual(os.listdir(self.tmp), ["d.html"])
-        self.assertEqual(checks_of(self.path("d.html")), ["dkim", "dnssec", "caa", "takeover", "axfr"])
+        self.assertEqual(checks_of(self.path("d.html")), ["dnssec", "caa", "takeover", "axfr"])
 
     def test_checks_of_the_other_command_are_refused(self):
         code, err = self.run_cmd("email", fixture("domains.csv"), "-o", self.path("e.html"), "--checks", "spf,caa")
@@ -85,7 +85,7 @@ class OneScanTest(TempDirTest):
         self.assertEqual(len(cmds), 1)
         self.assertTrue(cmds[0].startswith("securityhub dns "))
         self.assertIn("--email-output", cmds[0])
-        self.assertIn("--checks spf,dmarc,dkim,dnssec,caa,takeover,axfr", cmds[0])   # DKIM is in both reports
+        self.assertIn("--checks spf,dmarc,dnssec,caa,takeover,axfr", cmds[0])
         self.assertIn("--dmarc-reports", cmds[0])   # e-mail-only options travel with the shared scan
 
     def test_conflicting_options_keep_two_scans(self):

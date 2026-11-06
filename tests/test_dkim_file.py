@@ -104,20 +104,14 @@ class ScanTest(TempDirTest):
         self.assertIn("DKIM_KEY_MISMATCH", {i["code"] for i in res["fabrikam.example"]["issues"]})
         self.assertEqual(res["fabrikam.example"]["status"], "partial")
 
-    def test_dns_report_includes_dkim_in_its_score(self):
-        self.scan("fabrikam.example;corp2024\ncontoso.example;old2023\n", command="dns", checks="dkim,dnssec,caa")
-        fab, con = self.rows["fabrikam.example"], self.rows["contoso.example"]
-        self.assertEqual(fab["score_breakdown"]["components"]["dkim"], {"got": 25, "max": 25})
-        self.assertEqual(con["score_breakdown"]["components"]["dkim"], {"got": 0, "max": 25})    # listed, not published
-        self.assertIn("DKIM_DECLARED_MISSING", {i["code"] for i in con["issues"]})
-        self.assertLess(con["overall_score"], fab["overall_score"] + 1)
-
-    def test_without_the_file_the_dns_report_does_not_guess(self):
-        self.scan(None, command="dns", checks="dkim,dnssec,caa")
+    def test_dkim_is_an_email_control_only(self):
+        self.scan("fabrikam.example;corp2024\n", command="dns", checks="dnssec,caa")
         for r in self.rows.values():
-            self.assertEqual(r["dkim"]["status"], "skipped")
+            self.assertEqual(r["dkim"]["status"], "skipped")                      # not in the DNS report
             self.assertNotIn("dkim", r["score_breakdown"]["components"])
             self.assertFalse([i for i in r["issues"] if i["code"].startswith("DKIM")])
+        res = self.scan("fabrikam.example;corp2024\n")                          # the e-mail report evaluates it
+        self.assertEqual(res["fabrikam.example"]["status"], "valid")
 
     def test_file_can_be_ignored(self):
         res = self.scan("fabrikam.example;corp2024\n", "--dkim-file", "none")

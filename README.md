@@ -228,7 +228,7 @@ tema del portale. La stampa e il PDF executive usano sempre la versione chiara.
   (`1m-mm._domainkey.uk.example.com.  1  IN  TXT  "v=DKIM1;k=rsa;p=..."`; accettati anche CNAME e `dominio;selettore`).
   Con il file presente si verificano in DNS solo quei record (più i selettori visti nei report DMARC), senza
   tentare selettori comuni; un dominio di posta non elencato risulta "non verificato" e non pesa sullo score.
-  Il DKIM conta sia nello score email sia in quello DNS (25 punti). Se un record non è pubblicato il report lo segnala
+  Il DKIM è valutato nel report email (non in quello DNS). Se un record non è pubblicato il report lo segnala
   (`DKIM_DECLARED_MISSING`); se `p=` contiene la chiave reale e quella pubblicata è diversa, `DKIM_KEY_MISMATCH`
   (nel report finisce solo un'impronta della chiave). Esempio in `examples/dkim.example.csv`; `--dkim-file none` lo ignora.
 - **Query contemporanee limitate** (`max_inflight`, default 32) e limite al secondo opzionale (`qps`): il traffico

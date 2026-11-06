@@ -90,7 +90,7 @@ def probe_mailguard(args) -> List[dict]:
         except (OSError, ValueError) as e:
             out.append(_check("dkim.csv", FAIL, f"{dk}: {e}"))
     else:
-        out.append(_check("dkim.csv", WARN, "not found next to the domain list: DKIM is not verified in the DNS report",
+        out.append(_check("dkim.csv", WARN, "not found next to the domain list: DKIM selectors are searched among the common ones (e-mail report)",
                           "Put the DKIM records of each domain in dkim.csv next to the domain list"))
     from .scanners.dns_email.dnsclient import DNSClient, preflight
     ns = None if args.system_resolver else [n.strip() for n in args.nameservers.split(",") if n.strip()]
