@@ -92,9 +92,12 @@ class LightHistoryTest(TempDirTest):
         with mock.patch.object(portal, "load_report", lambda *a, **k: loaded.append(real(*a, **k)) or loaded[-1]):
             reports, history = portal.collect(orch.list_runs(self.tmp))
         self.assertEqual(len(loaded), 3)
-        self.assertTrue(all("html" not in r for r in loaded if r is not reports[0]))
-        self.assertIn("html", reports[0])
-        self.assertIsInstance(reports[0]["payload"], dict)
+        self.assertTrue(all("html" not in r for r in loaded))
+        # the latest run keeps only the data the joins use; its page is rebuilt from the file while writing the portal
+        self.assertNotIn("html", reports[0])
+        self.assertEqual(set(reports[0]["payload"]), {"results"})
+        self.assertNotIn("remediation", reports[0]["payload"]["results"][0])
+        self.assertIn("mg-data", portal.report_page(reports[0]))
         self.assertEqual(len(history["runs"]), 3)
 
 

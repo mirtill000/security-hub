@@ -167,7 +167,7 @@ class CliPortalTest(TempDirTest):
         self.assertEqual(kpis["pra_recorded"], 50)                                   # 2 of 4 assets governed and recorded
         self.assertEqual(r["exec"]["actions"][0]["code"], "ADMIN_NO_MFA")
         portal.compact_report(self.path("pra.html"))
-        self.assertEqual(portal.collect([self.path("pra.report.json")])[0][0]["html"], page)
+        self.assertEqual(portal.report_page(portal.collect([self.path("pra.report.json")])[0][0]), page)
 
     def test_orchestrator(self):
         p = self.path("c.json")

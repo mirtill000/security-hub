@@ -209,7 +209,7 @@ class CliPortalTest(TempDirTest):
         self.assertEqual(kpis, {"pp_routing": 50, "pp_clicks": 1, "pp_delivered": 2})
         self.assertEqual(r["exec"]["actions"][0]["code"], "CLICK_PERMITTED")
         portal.compact_report(self.path("pp.html"))
-        self.assertEqual(portal.collect([self.path("pp.report.json")])[0][0]["html"], page)
+        self.assertEqual(portal.report_page(portal.collect([self.path("pp.report.json")])[0][0]), page)
 
     def test_orchestrator(self):
         p = self.path("c.json")

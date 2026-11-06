@@ -84,7 +84,7 @@ const APP = {
   exposure: {
     checks: ['threats', 'vulnerabilities', 'scan'], label: 'Threats and vulnerabilities',
     render: r => {
-  let h = staleNote(r, 'threats');
+  let h = staleNote(r, 'vulnerabilities');
   if (vis(r, 'threats')) { const d = cd(r, 'threats'), ts = d.threats || [];
     h += sec('threats', 'Open threats', ts.length ? `<table><thead><tr><th>Threat</th><th>Classification</th><th>Confidence</th><th>Mitigation</th><th>Incident</th><th>Created</th></tr></thead><tbody>
       ${ts.map(t => `<tr><td class="mono">${esc(t.name)}</td><td class="sub">${esc(t.classification)}</td><td>${esc(t.confidence)}</td><td>${['mitigated', 'blocked', 'marked_as_benign'].includes(String(t.mitigation)) ? pill('valid', t.mitigation) : pill('error', t.mitigation || 'not mitigated')}</td>

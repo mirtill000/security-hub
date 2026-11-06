@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sys
@@ -72,16 +73,18 @@ def _umask_mode() -> int:
     return 0o666 & ~old
 
 
-def atomic_write(path: str, text: str, mode: Optional[int] = None) -> None:
-    """Write `text` so that readers (a browser, a SIEM collector, a dashboard) never see a half-written file.
+@contextlib.contextmanager
+def atomic_open(path: str, mode: Optional[int] = None, binary: bool = False):
+    """A file to write in parts that appears at `path` only when complete (readers never see half a file).
 
+    Large outputs (the portal) are written piece by piece instead of being built as one string in memory.
     The file gets `mode`, or the permissions a normal write would give (umask); never the 0600 of a temp file.
     """
     folder = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(prefix=".tmp-", suffix=os.path.splitext(path)[1], dir=folder)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(text)
+        with (os.fdopen(fd, "wb") if binary else os.fdopen(fd, "w", encoding="utf-8")) as f:
+            yield f
             f.flush()
             os.fsync(f.fileno())
         os.chmod(tmp, _umask_mode() if mode is None else mode)
@@ -92,6 +95,19 @@ def atomic_write(path: str, text: str, mode: Optional[int] = None) -> None:
         except OSError:
             pass
         raise
+
+
+def atomic_write(path: str, text: str, mode: Optional[int] = None) -> None:
+    """Write `text` so that readers (a browser, a SIEM collector, a dashboard) never see a half-written file."""
+    with atomic_open(path, mode) as f:
+        f.write(text)
+
+
+def atomic_copy(src: str, dst: str, mode: Optional[int] = None) -> None:
+    """Copy a file atomically in fixed-size chunks (constant memory, whatever its size)."""
+    import shutil
+    with open(src, "rb") as fin, atomic_open(dst, mode, binary=True) as fout:
+        shutil.copyfileobj(fin, fout, 1 << 20)
 
 
 class LockBusy(RuntimeError):

@@ -47,9 +47,9 @@ class AnalysisTest(TempDirTest):
         self.assertIn("AGENT_STALE", codes("ws-old-07"))            # 71 days at collection time (limit 45)
         # a stale agent reports only that: its other checks show its last known state and are not evaluated
         self.assertEqual({i.code for i in r["ws-old-07"].issues}, {"AGENT_STALE"})
-        self.assertEqual({c: x.status for c, x in r["ws-old-07"].checks.items() if c != "health"},
-                         {c: "unknown" for c in r["ws-old-07"].checks if c != "health"})
-        self.assertEqual(list(r["ws-old-07"].score_breakdown["components"]), ["health"])
+        self.assertEqual({c: x.status for c, x in r["ws-old-07"].checks.items() if c not in ("health", "threats")},
+                         {c: "unknown" for c in r["ws-old-07"].checks if c not in ("health", "threats")})
+        self.assertEqual(set(r["ws-old-07"].score_breakdown["components"]), {"health", "threats"})
         self.assertEqual(r["mac-design-03"].compliance["ransomware_ready"], "n/a")
         acc = {i.code for i in account}
         self.assertTrue({"EXCLUSION_BROAD", "POLICY_DETECT", "POLICY_ANTI_TAMPER_OFF", "EXCLUSION_NO_DESCRIPTION"} <= acc)
@@ -202,7 +202,7 @@ class CliPortalTest(TempDirTest):
         self.assertEqual(r["exec"]["actions"][0]["code"], "THREAT_ACTIVE")
         self.assertTrue(any(a["code"] == "COVERAGE_GAP" for a in r["exec"]["actions"]))
         portal.compact_report(self.path("edr.html"))
-        self.assertEqual(portal.collect([self.path("edr.report.json")])[0][0]["html"], page)
+        self.assertEqual(portal.report_page(portal.collect([self.path("edr.report.json")])[0][0]), page)
 
     def test_orchestrator(self):
         p = self.path("c.json")
@@ -229,3 +229,14 @@ class StaleWindowTest(unittest.TestCase):
         r = {x.domain: x for x in edr.analyze_snapshot(snap, list(edr.CHECKS), {})[0]}
         self.assertNotIn("AGENT_STALE", {i.code for i in r["ws-old-07"].issues})   # 40 days: not stale yet
         self.assertNotEqual(r["ws-old-07"].profile, "stale")
+
+    def test_open_threats_of_a_stale_agent_are_still_reported(self):
+        snap = snapshot()
+        old = next(a for a in snap["agents"] if a["computerName"] == "WS-OLD-07")
+        t = dict(snap["threats"][0], id="t-old", agent_id=old["id"], hostname=old["computerName"])
+        snap["threats"].append(t)
+        r = {x.domain: x for x in edr.analyze_snapshot(snap, list(edr.CHECKS), {})[0]}["ws-old-07"]
+        codes = {i.code for i in r.issues}
+        self.assertIn("AGENT_STALE", codes)
+        self.assertTrue(codes & {"THREAT_ACTIVE", "THREAT_UNRESOLVED"}, codes)     # the incident is still open
+        self.assertEqual(r.checks["protection"].status, "unknown")

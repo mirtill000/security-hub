@@ -32,8 +32,8 @@ def generate_html_report(results: List[EndpointResult], account_issues: List[Iss
         + " (normalized over the checks that could be evaluated: a policy that could not be read is not counted as failed).",
         "Active unmitigated threats, disabled or stale agents, Detect mode and anti-tamper off cap the score. "
         "Priority = tier weight x (100 - score + 15 x critical findings).",
-        f"Stale = not seen for more than {meta.get('stale_days')} days: only the stale agent is reported, its other "
-        f"checks are not evaluated (the console shows its last known state); threat triage SLA = {meta.get('sla_days')} days. "
+        f"Stale = not seen for more than {meta.get('stale_days')} days: only the stale agent and its open threats "
+        f"are reported, the other checks are not evaluated (the console shows its last known state); threat triage SLA = {meta.get('sla_days')} days. "
         "Decommissioned and uninstalled agents are not assessed.",
         "The policy of an endpoint is its group's policy when the group does not inherit, otherwise its site's policy.",
         "Read-only: the tool only lists agents, sites, groups, policies, open threats, exclusions and GA packages.",

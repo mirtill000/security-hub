@@ -47,7 +47,7 @@ class OneHtmlTest(TempDirTest):
             data = portal.compact_report(self.path(name + ".html"))
             self.assertFalse(os.path.exists(self.path(name + ".html")))
             r = portal.collect([data])[0][0]
-            self.assertEqual(r["html"], page, name)
+            self.assertEqual(portal.report_page(r), page, name)
 
     def test_rebuilt_dns_pages(self):
         with silenced(), fake_dns():
@@ -59,7 +59,7 @@ class OneHtmlTest(TempDirTest):
                 pages[n] = f.read()
             portal.compact_report(self.path(n + ".html"))
         for r in portal.collect([self.path("email.report.json"), self.path("dns.report.json")])[0]:
-            self.assertEqual(r["html"], pages[r["type"]], r["type"])
+            self.assertEqual(portal.report_page(r), pages[r["type"]], r["type"])
 
     def test_older_runs_with_pages_are_converted(self):
         with silenced():

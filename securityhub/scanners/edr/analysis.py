@@ -167,10 +167,11 @@ def analyze_snapshot(snap: dict, checks: List[str], metadata: Dict[str, dict], i
         health = r.checks.get("health")
         if health is not None and any(i.code == "AGENT_STALE" for i in health.issues):
             # The agent has not reported for stale_days: what the console shows for it is its last known state, which may
-            # change when it comes back online. Only the stale agent is reported; the other checks are not evaluated.
+            # change when it comes back online. Only the stale agent is reported; the other checks are not evaluated -
+            # except open threats: they are incidents in the console, still to be handled while the machine is offline.
             health.issues = [i for i in health.issues if i.code == "AGENT_STALE"]
             for c in checks:
-                if c != "health":
+                if c not in ("health", "threats"):
                     ch = r.checks[c]
                     r.checks[c] = CheckResult(status="unknown", max=ch.max, data={**(ch.data or {}), "not_evaluated":
                                               f"agent not seen for {(health.data or {}).get('last_seen_days')} days"})

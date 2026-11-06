@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import gc
 import importlib
 import json
 import os
@@ -32,7 +33,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-from .common import EXIT_FAIL_UNDER, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, LockBusy, RunLock, atomic_write
+from .common import EXIT_FAIL_UNDER, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, LockBusy, RunLock, atomic_copy, atomic_write
 from .console import Progress, Style, fmt_secs, print_posture
 
 # name -> (module, positional argument fed from `input`, human label)
@@ -456,8 +457,7 @@ def publish_outputs(publish: dict, hub: str, posture_file: str) -> List[str]:
         pairs.append((posture_file, os.path.join(publish["dir"], "posture.json")))
     done = []
     for src, dst in pairs:
-        with open(src, encoding="utf-8") as f:
-            atomic_write(dst, f.read(), publish["mode"])
+        atomic_copy(src, dst, publish["mode"])   # streamed: the portal can be large, the device small
         done.append(dst)
     return done
 
@@ -717,8 +717,14 @@ def _execute(cfg, plans, out_dir, stamp, when, run_dir, parallel, max_age, fail_
                 failed[area] = info
     reports, history = portal.collect(list_runs(out_dir))
     hub = os.path.join(out_dir, "security_hub.html")
-    portal.build_hub(reports, hub, str(cfg.get("title") or ""), history, max_age, failed)
-    summary = portal.posture(reports, history, max_age, failed=failed)
+    joined = portal.joins(reports)   # inventory and cross-module risks: once, for the portal and posture.json
+    portal.build_hub(reports, hub, str(cfg.get("title") or ""), history, max_age, failed, joined)
+    for r in reports:                # the pages and their data are no longer needed: free them before what follows
+        r.pop("html", None)
+        r.pop("payload", None)
+    summary = portal.posture(reports, history, max_age, failed=failed, joined=joined)
+    del joined, history
+    gc.collect()
     summary["run"] = {"id": stamp, "folder": run_dir, "max_parallel": parallel,
                       "modules": [{"module": r.name, "exit_code": r.code, "seconds": round(r.seconds, 1), "report": r.report,
                                    "log": r.log, "timed_out": r.timed_out, "error": r.error} for r in ordered]}

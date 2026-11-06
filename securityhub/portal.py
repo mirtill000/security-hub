@@ -30,7 +30,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from .common import EXIT_OK, EXIT_USAGE, Parser, atomic_write, grade, json_for_html
+from .common import EXIT_OK, EXIT_USAGE, Parser, atomic_open, atomic_write, grade, json_for_html
 from . import correlations, inventory, ui
 
 __version__ = "1.2.0"
@@ -893,21 +893,138 @@ def _links_safe(reports: List[dict]) -> dict:
         return {"links": [], "summary": {"total": 0, "error": str(e)}}
 
 
+def joins(reports: List[dict]) -> dict:
+    """Asset inventory and cross-module risks: computed once, used by the portal and by posture.json."""
+    return {"inventory": inventory.build(reports), "links": _links_safe(reports)}
+
+
+# What the joins (inventory, cross-module risks) read from a report: the rest of a large report (thousands of
+# endpoints with their checks) is not kept in memory once its summary and KPIs are computed.
+SLIM_TOP = ("results", "people", "tap", "no_mail", "tenant")
+SLIM_ROW_DROP = ("remediation", "score_breakdown", "change", "frameworks")
+SLIM_ROW_ONLY = {"edr": ("domain", "profile")}
+
+
+def slim_payload(kind: str, payload: Any) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+    out = {k: payload[k] for k in SLIM_TOP if k in payload}
+    only = SLIM_ROW_ONLY.get(kind)
+    rows = []
+    for x in out.get("results") or []:
+        if not isinstance(x, dict):
+            continue
+        rows.append({k: x.get(k) for k in only} if only else {k: v for k, v in x.items() if k not in SLIM_ROW_DROP})
+    if "results" in out:
+        out["results"] = rows
+    return out
+
+
+CHUNK = 1 << 20
+PAYLOAD_KEY = re.compile(r'^\{\s*"format"\s*:.*?,\s*"payload"\s*:\s*', re.S)
+
+
+def _enc(text: str) -> str:
+    """`text` as the inside of a JSON string safe in a <script> element (concatenation-safe: chunks can be encoded apart)."""
+    return json_for_html(text)[1:-1]
+
+
+def _html_json(text: str) -> str:
+    """Raw JSON text made safe to embed in a <script> element, as json_for_html would write it (per character)."""
+    return (text.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+            .replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"))
+
+
+def _write_page(f, r: dict) -> None:
+    """Write the page of report `r` as a JSON string, rebuilding it from its file in chunks: a large report is never
+    held in memory as a whole (nor its parsed data), whatever its size."""
+    if "html" in r:  # given by the caller
+        f.write(json_for_html(r["html"]))
+        return
+    path = r["path"]
+    f.write('"')
+    if path.endswith(REPORT_DATA_SUFFIX):
+        with open(path, encoding="utf-8") as src:
+            head = src.read(CHUNK)
+            m = PAYLOAD_KEY.match(head)
+            i = head.rfind(",", 0, m.end()) if m else -1
+            try:
+                title = json.loads(head[:i] + "}").get("title") if i > 0 else None
+            except ValueError:
+                title, i = None, -1
+            if i < 0:  # not the report-data layout (format, title, then payload): parse it
+                src.seek(0)
+                data = json.load(src)
+                page = build_page(r["type"], data.get("title") or r["title"], data.get("payload"))
+                f.write(_enc(page))
+                f.write('"')
+                return
+            template, css, js = page_parts(r["type"])
+            pre, _, post = (template.replace("__TITLE__", html.escape(title or r["title"])).replace("__CSS__", css)
+                            .replace("__JS__", js)).partition("__DATA__")
+            f.write(_enc(pre))
+            buf = head[m.end():]
+            while True:   # the data ends with the closing brace of the file: keep a short tail until the end
+                nxt = src.read(CHUNK)
+                if not nxt:
+                    break
+                buf += nxt
+                f.write(_enc(_html_json(buf[:-64])))
+                buf = buf[-64:]
+            buf = buf.rstrip()
+            f.write(_enc(_html_json(buf[:-1] if buf.endswith("}") else buf)))
+            f.write(_enc(post))
+    else:
+        with open(path, encoding="utf-8", errors="replace") as src:
+            for chunk in iter(lambda: src.read(CHUNK), ""):
+                f.write(_enc(chunk))
+    f.write('"')
+
+
+def report_page(r: dict) -> str:
+    """The page of a collected report, rebuilt from its file (collect keeps neither pages nor full data in memory)."""
+    import io
+    buf = io.StringIO()
+    _write_page(buf, r)
+    return json.loads(buf.getvalue())
+
+
+HUB_MARKERS = re.compile(r"(__TITLE__|__CSS__|__JS__|__DATA__|__REPORTS__)")
+
+
 def build_hub(reports: List[dict], out: str, title: str, history: Optional[dict] = None,
-              max_age: Optional[Dict[str, float]] = None, failed: Optional[Dict[str, dict]] = None) -> int:
-    """failed: area -> {"at", "error"} for the areas whose module failed in the latest run (their data is older)."""
+              max_age: Optional[Dict[str, float]] = None, failed: Optional[Dict[str, dict]] = None,
+              joined: Optional[dict] = None) -> int:
+    """failed: area -> {"at", "error"} for the areas whose module failed in the latest run (their data is older).
+
+    The page is written piece by piece (each report in turn), never built as one string: on a small device the
+    portal of large portfolios would otherwise need several copies of itself in memory.
+    """
+    joined = joined or joins(reports)
     meta = {"version": __version__, "title": title, "generated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
             "failed": failed or {},
             "max_age_days": {**MAX_AGE_DAYS, **(max_age or {})},
             "portfolio": portfolio(reports), "history": history or {"series": [], "runs": []},
-            "inventory": inventory.build(reports), "links": _links_safe(reports)}
+            "inventory": joined["inventory"], "links": joined["links"]}
     index = [{k: v for k, v in r.items() if k not in ("html", "payload", "path")} for r in reports]
-    blocks = "\n".join(f'<script type="application/json" id="rep-{r["id"]}">{_json_for_html(r["html"])}</script>' for r in reports)
-    page = (HUB_TEMPLATE.replace("__TITLE__", html.escape(title or "GuardHub")).replace("__CSS__", HUB_CSS).replace("__JS__", HUB_JS)
-            .replace("__DATA__", _json_for_html({"meta": meta, "reports": index}))
-            .replace("__REPORTS__", blocks))
-    atomic_write(out, page)
-    return len(page.encode("utf-8"))
+    with atomic_open(out) as f:
+        for part in HUB_MARKERS.split(HUB_TEMPLATE):
+            if part == "__TITLE__":
+                f.write(html.escape(title or "GuardHub"))
+            elif part == "__CSS__":
+                f.write(HUB_CSS)
+            elif part == "__JS__":
+                f.write(HUB_JS)
+            elif part == "__DATA__":
+                f.write(_json_for_html({"meta": meta, "reports": index}))
+            elif part == "__REPORTS__":
+                for k, r in enumerate(reports):
+                    f.write(f'{chr(10) if k else ""}<script type="application/json" id="rep-{r["id"]}">')
+                    _write_page(f, r)
+                    f.write("</script>")
+            else:
+                f.write(part)
+    return os.path.getsize(out)
 
 
 def build_parser() -> Parser:
@@ -930,8 +1047,10 @@ def collect(inputs: List[str], include_all: bool = False, exclude: Optional[List
     files = [f for f in files if os.path.realpath(f) not in skip]
     loaded = [load_report(f, i, keep=False) for i, f in enumerate(files)]  # one report in memory at a time
     reports, history = split_history(loaded)
-    for r in reports:  # only the latest run of each tool is embedded and correlated: load its page again
-        r["html"], r["payload"], _ = _read_report(r["path"], r["type"])
+    for r in reports:  # only the latest run of each tool is correlated: load its data again, keeping what the joins use
+        _, payload, _ = _read_report(r["path"])
+        r["payload"] = slim_payload(r["type"], payload)
+        del payload
     reports.sort(key=lambda r: (TYPE_ORDER[r["type"]], r["title"]))
     return reports, history
 
@@ -974,7 +1093,7 @@ def overall_status(areas: List[dict]) -> dict:
 
 
 def posture(reports: List[dict], history: Optional[dict] = None, max_age: Optional[Dict[str, float]] = None,
-            now: Optional[datetime] = None, failed: Optional[Dict[str, dict]] = None) -> dict:
+            now: Optional[datetime] = None, failed: Optional[Dict[str, dict]] = None, joined: Optional[dict] = None) -> dict:
     """Machine-readable posture summary (for monitoring, SIEM ingestion or CI gates)."""
     areas = []
     for r in reports:
@@ -990,8 +1109,8 @@ def posture(reports: List[dict], history: Optional[dict] = None, max_age: Option
             **({"last_run_failed": (failed or {})[r["type"]]} if r["type"] in (failed or {}) else {}),
         })
     pf = portfolio(reports)
-    inv = inventory.build(reports, now)
-    lk = _links_safe(reports)
+    inv = joined["inventory"] if joined else inventory.build(reports, now)
+    lk = joined["links"] if joined else _links_safe(reports)
     assets = [{"asset": a["key"], "status": a["status"], "tier": a["tier"], "score": a["score"], "owners": a["owners"],
                "domains": [d["domain"] for d in a["dns"]], "websites": [w["domain"] for w in a["web"]],
                "next_expiry": a["next_expiry"] and {k: a["next_expiry"][k] for k in ("kind", "name", "date", "days")},

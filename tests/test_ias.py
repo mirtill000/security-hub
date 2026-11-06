@@ -115,7 +115,7 @@ class CliPortalTest(TempDirTest):
         self.assertEqual(kpis["ias_priv_pwd"], 1)
         self.assertEqual(r["exec"]["actions"][0]["code"], "PASSWORD_LOGIN_PRIVILEGED")
         portal.compact_report(self.path("ias.html"))
-        self.assertEqual(portal.collect([self.path("ias.report.json")])[0][0]["html"], page)
+        self.assertEqual(portal.report_page(portal.collect([self.path("ias.report.json")])[0][0]), page)
 
     def test_orchestrator(self):
         p = self.path("c.json")
