@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
-from .constants import ENGINES, EXECUTABLE_TYPES, MITIGATED, OPTIONAL_ENGINES
+from .constants import ENGINE_FINDING, ENGINES, EXECUTABLE_TYPES, MITIGATED, OPTIONAL_ENGINES
 from .models import CheckResult, make_issue
 
 
@@ -95,12 +95,17 @@ def check_policy(a: dict, policy: Optional[dict], scope: Optional[str]) -> Check
     if tamper is False:
         c.issues.append(make_issue("ANTI_TAMPER_OFF"))
         got -= 12
+    for k in off:   # one finding per engine: the engine is named in the finding title
+        if k in ENGINE_FINDING:
+            issue = make_issue(ENGINE_FINDING[k])
+            if scope:
+                issue.message += f" (policy: {scope})"
+            c.issues.append(issue)
+        else:
+            c.issues.append(make_issue("ENGINE_OFF", k))
     required_off = [k for k in off if k not in OPTIONAL_ENGINES]
     if required_off:
-        c.issues.append(make_issue("ENGINE_OFF", ", ".join(ENGINES.get(k, k) for k in required_off)))
         got -= min(8, 3 * len(required_off))
-    if [k for k in off if k in OPTIONAL_ENGINES]:
-        c.issues.append(make_issue("ENGINE_OFF", ", ".join(ENGINES[k] for k in off if k in OPTIONAL_ENGINES), severity="info"))
     if snapshots is False and str(a.get("osType") or "").lower() == "windows":
         c.issues.append(make_issue("SNAPSHOTS_OFF"))
         got -= 5

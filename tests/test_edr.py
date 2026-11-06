@@ -38,7 +38,11 @@ class AnalysisTest(TempDirTest):
         codes = lambda h: {i.code for i in r[h].issues}
         self.assertIn("THREAT_ACTIVE", codes("srv-sql-01"))
         self.assertEqual(r["srv-sql-01"].overall_score, 20)        # capped by the active threat
-        self.assertTrue({"MODE_DETECT", "ANTI_TAMPER_OFF", "ENGINE_OFF"} <= codes("srv-web-02"))
+        self.assertTrue({"MODE_DETECT", "ANTI_TAMPER_OFF"} <= codes("srv-web-02"))
+        eng = [i for i in r["srv-web-02"].issues if i.code.startswith("ENGINE_OFF")]
+        self.assertTrue(eng and all(i.code != "ENGINE_OFF" for i in eng))            # one finding per named engine
+        self.assertTrue(all(i.message.startswith("Detection engine disabled: ") for i in eng))
+        self.assertTrue(all("(policy: group Lab)" in i.message for i in eng), [i.message for i in eng])
         self.assertEqual(r["srv-web-02"].checks["policy"].data["scope"], "group Lab")   # group does not inherit
         self.assertEqual(r["ws-milano-01"].checks["policy"].data["scope"], "site EMEA")
         self.assertIn("AGENT_VERY_OLD", codes("ws-milano-02"))

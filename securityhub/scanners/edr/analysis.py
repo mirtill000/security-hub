@@ -106,11 +106,12 @@ REMEDIATION = {
 def suggest_remediation(r: EndpointResult) -> List[dict]:
     seen, out = set(), []
     for i in r.issues:
-        if i.code in REMEDIATION and i.code not in seen:
-            seen.add(i.code)
-            title, steps = REMEDIATION[i.code]
-            out.append({"title": title, "type": "SentinelOne console", "name": r.domain, "value": steps,
-                        "note": i.message})
+        code = "ENGINE_OFF" if i.code.startswith("ENGINE_OFF") else i.code   # one fix for all the engines
+        if code in REMEDIATION and code not in seen:
+            seen.add(code)
+            title, steps = REMEDIATION[code]
+            note = "; ".join(x.message for x in r.issues if x.code.startswith("ENGINE_OFF")) if code == "ENGINE_OFF" else i.message
+            out.append({"title": title, "type": "SentinelOne console", "name": r.domain, "value": steps, "note": note})
     return out
 
 

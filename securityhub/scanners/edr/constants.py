@@ -108,6 +108,14 @@ ENGINES = {"reputation": "Reputation", "preExecution": "Static AI", "preExecutio
            "lateralMovement": "Lateral movement", "penetration": "Behavioral AI - fileless", "pup": "Potentially unwanted apps"}
 OPTIONAL_ENGINES = {"pup"}  # off is a choice, reported as info
 
+# One finding per detection engine, so the engine that is off is named everywhere (findings list, counts, portal
+# actions), not only in the detail of each endpoint. ENGINE_OFF stays for engines this catalogue does not know.
+ENGINE_FINDING = {k: "ENGINE_OFF_" + "".join("_" + c if c.isupper() else c.upper() for c in k) for k in ENGINES}
+for _k, _code in ENGINE_FINDING.items():
+    FINDINGS[_code] = ("info" if _k in OPTIONAL_ENGINES else "warning", "Policy", f"Detection engine disabled: {ENGINES[_k]}",
+                       f"Turn on the {ENGINES[_k]} engine in the site or group policy (Sentinels > Policy > Engines)"
+                       + (": optional, off can be a deliberate choice" if _k in OPTIONAL_ENGINES else ""))
+
 # Threat mitigation statuses that mean "the threat was stopped"
 MITIGATED = {"mitigated", "blocked", "marked_as_benign", "suspicious_resolved", "resolved"}
 EXECUTABLE_TYPES = {"exe", "dll", "sys", "scr", "com", "ps1", "psm1", "vbs", "js", "jse", "bat", "cmd", "hta", "msi",

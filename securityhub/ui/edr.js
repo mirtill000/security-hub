@@ -12,7 +12,7 @@ const SHORT = {health: 'Health', protection: 'Mode', policy: 'Policy', version: 
 const DETAIL = {
   health: r => { const d = cd(r, 'health'); return d.last_seen_days === null || d.last_seen_days === undefined ? '' : d.last_seen_days === 0 ? 'seen today' : `seen ${d.last_seen_days}d ago`; },
   protection: r => cd(r, 'protection').mode || '',
-  policy: r => { const d = cd(r, 'policy'); return d.anti_tamper === false ? 'anti-tamper off' : (d.engines_off || []).length ? `${d.engines_off.length} engines off` : (d.scope || ''); },
+  policy: r => { const d = cd(r, 'policy'); return d.anti_tamper === false ? 'anti-tamper off' : (d.engines_off || []).length ? `off: ${d.engines_off.join(', ')}` : (d.scope || ''); },
   version: r => cd(r, 'version').agent_version || '',
   threats: r => { const d = cd(r, 'threats'); return d.open ? `${d.active || 0} active, ${d.open} open` : ''; },
   vulnerabilities: r => cd(r, 'vulnerabilities').status || ''
