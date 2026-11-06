@@ -88,6 +88,8 @@ FINDINGS: Dict[str, Tuple[str, str, str, str]] = {
                   "Allow sha256 (RFC 8301)"),
     "DKIM_DECLARED_MISSING": ("warning", "DKIM", "DKIM selector listed in dkim.csv is not published in DNS",
                               "Publish the key given by the mail platform for this selector, or remove the selector from dkim.csv if it is no longer used"),
+    "DKIM_NOT_DECLARED": ("info", "DKIM", "No DKIM record listed in dkim.csv for this mail domain: DKIM not verified",
+                          "Add the domain's DKIM records (selector._domainkey TXT or CNAME) to dkim.csv"),
     "DKIM_KEY_MISMATCH": ("warning", "DKIM", "Published DKIM key differs from the one in dkim.csv",
                           "Check whether the key was rotated (then update dkim.csv) or the DNS record was changed without authorization"),
     "DKIM_REVOKED": ("info", "DKIM", "Revoked DKIM selector (empty p=)",

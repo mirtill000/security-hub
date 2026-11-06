@@ -349,9 +349,75 @@ class AuthChecks:
             return sel, False, None
         return None, False, None
 
+    def _dkim_declared(self, domain: str, declared: List[str], mail_enabled: bool) -> DKIMResult:
+        """DKIM from dkim.csv only: the listed records are verified in DNS, no selector is guessed.
+
+        Selectors seen in the DMARC aggregate reports are verified too (they are observed, not guessed).
+        A domain with no listed selector is 'unknown' (not counted in the score), or 'na' when it handles no mail.
+        """
+        result = DKIMResult(declared=list(declared), mode="dkim.csv")
+        from_reports = [s for s in self.report_selectors.get(domain, []) if s not in declared]
+        names = declared + from_reports
+        if not names:
+            result.status = "unknown" if mail_enabled else "na"
+            if mail_enabled:
+                result.issues.append(make_issue("DKIM_NOT_DECLARED"))
+            return result
+        errors = 0
+        for name, fut in [(n, self._pool.submit(self._probe_selector, domain, n)) for n in names]:
+            sel, err, dangling = fut.result()
+            errors += bool(err)
+            if sel:
+                sel.source = "declared" if name in declared else "report"
+                result.selectors.append(sel)
+            if dangling:
+                result.dangling.append(dangling)
+        result.probed = result.total_selectors = len(names)
+        found = {s.name: s for s in result.selectors}
+        problems: List[Tuple[str, str]] = []
+        for s in result.selectors:
+            label = f"{s.name} ({s.key_size} bit)" if s.key_size else s.name
+            if s.status == "weak":
+                problems.append(("DKIM_BROKEN_KEY" if (s.key_size or 0) < 1000 else "DKIM_WEAK", label))
+            elif s.status == "invalid":
+                problems.append(("DKIM_INVALID", s.name))
+            elif s.status == "revoked":
+                problems.append(("DKIM_REVOKED", s.name))
+            if s.testing:
+                problems.append(("DKIM_TESTING", s.name))
+            if s.hash_algorithms and "sha256" not in s.hash_algorithms:
+                problems.append(("DKIM_SHA1", s.name))
+        if not errors:
+            for name in declared:
+                if name not in found:
+                    problems.append(("DKIM_DECLARED_MISSING", name))
+                    continue
+                exp, got = self.domain_dkim_expected.get((domain, name)) or {}, found[name]
+                if exp.get("key_id") and got.key_id and got.key_id != exp["key_id"]:
+                    problems.append(("DKIM_KEY_MISMATCH", f"{name}: published key differs from dkim.csv"))
+                elif exp.get("cname") and got.cname and got.cname.rstrip(".").lower() != exp["cname"]:
+                    problems.append(("DKIM_KEY_MISMATCH", f"{name}: CNAME {got.cname} instead of {exp['cname']}"))
+        result.issues = issues_from_problems(problems)
+        usable = [s for s in result.selectors if s.status in ("valid", "weak")]
+        result.valid_selectors = len(usable)
+        result.weak_keys = sum(s.status == "weak" for s in usable)
+        codes = {i.code for i in result.issues}
+        if errors and not usable:
+            result.status = "dns_error"
+            result.issues.append(make_issue("DKIM_DNS_ERROR", f"{errors}/{len(names)} queries failed"))
+        elif not usable:
+            result.status = "error" if any(s.status == "invalid" for s in result.selectors) else "missing"
+        elif result.weak_keys or codes & {"DKIM_DECLARED_MISSING", "DKIM_KEY_MISMATCH"}:
+            result.status = "partial"
+        else:
+            result.status = "valid"
+        return result
+
     def _analyze_dkim(self, domain: str, mail_enabled: bool = True, providers: Sequence[str] = ()) -> DKIMResult:
         result = DKIMResult()
         declared = self.domain_selectors.get(domain, [])  # from dkim.csv
+        if self.dkim_declared_only:
+            return self._dkim_declared(domain, declared, mail_enabled)
 
         if self.fast_dkim and not declared:
             # RFC 8020: NXDOMAIN on _domainkey means no selector can exist below it

@@ -53,6 +53,8 @@ class Scoring:
 
     def _calculate_score(self, r: DomainResult) -> int:
         weighted = [c for c in CHECKS if c in self.checks and CHECKS[c]]
+        if r.dkim.status == "unknown":  # no DKIM record listed in dkim.csv: not verified, not counted
+            weighted = [c for c in weighted if c != "dkim"]
         max_total = sum(CHECKS[c] for c in weighted)
         if not r.exists or r.profile == "unreachable":
             r.score_breakdown = {"components": {}, "max": max_total, "normalized": False, "cap": None,

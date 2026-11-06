@@ -85,6 +85,7 @@ class DKIMResult:
     full_search: Optional[str] = None  # when the full selector search was last run, if this run reused it
     dangling: List[dict] = field(default_factory=list)  # {"name", "target"}
     declared: List[str] = field(default_factory=list)   # selectors listed for the domain in dkim.csv
+    mode: str = "probe"      # probe: selectors searched in DNS | dkim.csv: only the listed records, verified in DNS
     issues: List[Issue] = field(default_factory=list)
 
 

@@ -225,7 +225,9 @@ tema del portale. La stampa e il PDF executive usano sempre la versione chiara.
 - **Record DKIM propri (`dkim.csv`)**: un file `dkim.csv` accanto alla lista domini (o `dkim_file:` nella
   configurazione, `--dkim-file` da riga di comando) elenca i record DKIM di ogni dominio come righe di zona DNS
   (`1m-mm._domainkey.uk.example.com.  1  IN  TXT  "v=DKIM1;k=rsa;p=..."`; accettati anche CNAME e `dominio;selettore`).
-  I selettori sono interrogati per primi e attesi: se uno non è pubblicato il report lo segnala
+  Con il file presente si verificano in DNS solo quei record (più i selettori visti nei report DMARC), senza
+  tentare selettori comuni; un dominio di posta non elencato risulta "non verificato" e non pesa sullo score.
+  Il DKIM conta sia nello score email sia in quello DNS (25 punti). Se un record non è pubblicato il report lo segnala
   (`DKIM_DECLARED_MISSING`); se `p=` contiene la chiave reale e quella pubblicata è diversa, `DKIM_KEY_MISMATCH`
   (nel report finisce solo un'impronta della chiave). Esempio in `examples/dkim.example.csv`; `--dkim-file none` lo ignora.
 - **Query contemporanee limitate** (`max_inflight`, default 32) e limite al secondo opzionale (`qps`): il traffico

@@ -222,7 +222,7 @@ def main(argv: Optional[List[str]] = None, command: str = "dns") -> int:
             scope = VIEWS[command]["checks"]
             other = "dns" if command == "email" else "email"
             named = [CHECK_ALIASES.get(t, t) for t in re.split(r"[,\s]+", args.checks.strip().lower()) if t]
-            wrong = [t for t in named if t in VIEWS[other]["checks"]]
+            wrong = [t for t in named if t in VIEWS[other]["checks"] and t not in scope]
             if wrong:
                 raise ValueError(f"{', '.join(wrong)}: {'e-mail' if other == 'email' else 'DNS'} check(s), "
                                  f"use 'securityhub {other}'")
@@ -322,8 +322,9 @@ def main(argv: Optional[List[str]] = None, command: str = "dns") -> int:
                        for t in args.lookalike_tiers.split(",") if t.strip()} or None
 
     checks_label = "default set" if checks == DEFAULT_CHECKS else ", ".join(CHECK_LABELS[c] for c in checks)
-    dkim_info = (f"; {len(selectors)} DKIM selectors" + (f", own selectors for {len(domain_selectors)} domain(s) from {os.path.basename(dkim_file)}"
-                                                          if domain_selectors else "")) if "dkim" in checks else ""
+    dkim_info = ((f"; DKIM from {os.path.basename(dkim_file)}: {sum(map(len, domain_selectors.values()))} record(s) of "
+                  f"{len(domain_selectors)} domain(s), verified in DNS" if dkim_file else f"; {len(selectors)} DKIM selectors")
+                 if "dkim" in checks else "")
     print(f"Analyzing {len(inputs)} domain(s) via live DNS "
           f"({'system resolver' if args.system_resolver else ', '.join(nameservers)}; "
           f"{workers} workers{dkim_info})\nChecks: {checks_label}", file=sys.stderr)
@@ -339,6 +340,7 @@ def main(argv: Optional[List[str]] = None, command: str = "dns") -> int:
                                      cache=store if store.enabled else None, discovery_max_age=args.cache_max_age)
     analyzer.extra_selectors = extra
     analyzer.domain_selectors = domain_selectors
+    analyzer.dkim_declared_only = bool(dkim_file)
     analyzer.domain_dkim_expected = {k: v for k, v in dkim_expected.items() if k[0] in domain_selectors}
     progress = Progress(len(inputs), args.quiet)
     executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="domain")
