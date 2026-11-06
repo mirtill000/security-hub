@@ -8,7 +8,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
-from securityhub import orchestrator as orch
+from securityhub import cli, orchestrator as orch
 from securityhub.common import EXIT_FAIL_UNDER, EXIT_OK, EXIT_USAGE
 from securityhub.scanners import waf
 
@@ -112,6 +112,23 @@ class RunTest(TempDirTest):
         runs = orch.list_runs(self.path("out"))
         self.assertEqual([os.path.basename(r) for r in runs],
                          [(T0 + timedelta(days=d)).strftime(orch.RUN_FORMAT) for d in (2, 3)])
+
+    def test_single_module_runs_update_the_portal_and_keep_other_areas(self):
+        cfg = self.config(keep_runs=2)
+        self.run_hub(cfg, T0)                                            # full run: waf + zta
+        for d in range(1, 5):                                            # then only zta, more often than keep_runs
+            self.run_hub(cfg, T0 + timedelta(days=d), only=["zta"])
+        runs = [os.path.basename(r) for r in orch.list_runs(self.path("out"))]
+        self.assertIn(T0.strftime(orch.RUN_FORMAT), runs)                # still holds the latest waf report
+        self.assertEqual(len(runs), 3)                                   # full run + last 2 zta runs
+        with open(self.path("out", "posture.json"), encoding="utf-8") as f:
+            areas = {a["area"]: a for a in json.load(f)["areas"]}
+        self.assertEqual(set(areas), {"waf", "zta"})
+        self.assertTrue(areas["zta"]["date"])
+        with silenced() as (out, _):                                     # 'securityhub run zta' = --only zta
+            self.assertEqual(cli.main(["run", "zta", "-c", cfg, "--dry-run"]), EXIT_OK)
+        self.assertIn("securityhub zta", out.getvalue())
+        self.assertNotIn("securityhub waf", out.getvalue())
 
     def test_dry_run_writes_nothing(self):
         with silenced() as (out, _):

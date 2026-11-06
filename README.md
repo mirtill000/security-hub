@@ -122,7 +122,7 @@ Vedi [`examples/securityhub.example.yaml`](examples/securityhub.example.yaml) (g
 ```yaml
 title: "Contoso - Security posture"
 output_dir: reports
-keep_runs: 12            # esecuzioni conservate per i trend (0 = tutte)
+keep_runs: 12            # esecuzioni conservate per ogni modulo, per i trend (0 = tutte)
 fail_under: 70           # opzionale: exit code 2 se un'area/asset scende sotto la soglia
 auto_baseline: true      # ogni modulo viene confrontato con la sua esecuzione precedente
 
@@ -148,6 +148,12 @@ modules:
 - **Le credenziali non vanno nel file**: `api_key` viene rifiutata. Usa `IMPERVA_API_ID` / `IMPERVA_API_KEY`
   oppure `api_key_file`.
 - È accettato anche JSON (`securityhub run -c hub.json`), senza bisogno di PyYAML.
+
+**Un solo modulo nel report complessivo:** `securityhub run pra` (o più moduli: `securityhub run pra waf`, equivalente a
+`--only pra,waf`) esegue solo quei moduli con la configurazione, poi ricostruisce e pubblica il portale con i loro report
+nuovi e gli ultimi report di tutte le altre aree. `keep_runs` vale per modulo, quindi lanciare spesso un solo modulo non
+cancella gli ultimi report delle altre aree. Il comando diretto (`securityhub pra -o file.html`) produce invece un report
+isolato, che il portale non vede.
 
 Opzioni utili di `run`: `--only dns,zta`, `--dry-run` (mostra i comandi senza eseguirli), `-q` (solo la posture),
 `-v` (mostra anche l'output dei moduli, con il prefisso `[dns]`, `[waf]`, `[zta]`), `-p N` (moduli in parallelo),

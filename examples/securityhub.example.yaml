@@ -3,7 +3,7 @@
 
 title: "Contoso - Security posture"      # shown in the portal
 output_dir: reports                      # runs, portal and posture summary go here
-keep_runs: 12                            # older run folders are deleted (0 = keep all)
+keep_runs: 12                            # runs kept per module; older ones are deleted (0 = keep all)
 # fail_under: 70                         # exit code 2 if an area / asset scores below this
 # auto_baseline: true                    # compare every module with its previous run
 # max_parallel: 3                        # modules run at the same time (1 = one after the other)

@@ -30,7 +30,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from .common import EXIT_FAIL_UNDER, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, LockBusy, RunLock, atomic_write
 from .console import Progress, Style, fmt_secs, print_posture
@@ -78,7 +78,7 @@ EXAMPLE_CONFIG = """\
 
 title: "Contoso - Security posture"      # shown in the portal
 output_dir: reports                      # runs, portal and posture summary go here
-keep_runs: 12                            # older run folders are deleted (0 = keep all)
+keep_runs: 12                            # runs kept per module; older ones are deleted (0 = keep all)
 # fail_under: 70                         # exit code 2 if an area / asset scores below this
 # auto_baseline: true                    # compare every module with its previous run
 # max_parallel: 3                        # modules run at the same time (1 = one after the other)
@@ -325,11 +325,36 @@ def previous_export(runs: List[str], name: str) -> Optional[str]:
     return None
 
 
+def run_areas(run: str) -> Set[str]:
+    """Modules with a report in a run folder (<module>.report.json, or <module>.html before compaction)."""
+    out: Set[str] = set()
+    try:
+        names = os.listdir(run)
+    except OSError:
+        return out
+    for n in names:
+        if n.endswith(".report.json"):
+            out.add(n[:-len(".report.json")])
+        elif n.endswith(".html"):
+            out.add(n[:-len(".html")])
+    return out
+
+
 def prune_runs(output_dir: str, keep: int) -> List[str]:
+    """Keep the last `keep` runs of EACH module, not just the last `keep` runs: running one module often
+    (`securityhub run pra`) must not delete the latest reports of the other areas. Runs without any report
+    (every module failed) are kept only while they are among the last `keep` runs."""
     if keep <= 0:
         return []
     runs = list_runs(output_dir)
-    removed = runs[:-keep] if len(runs) > keep else []
+    keep_set = set(runs[-keep:])
+    by_area: Dict[str, List[str]] = {}
+    for r in runs:
+        for a in run_areas(r):
+            by_area.setdefault(a, []).append(r)
+    for rs in by_area.values():
+        keep_set.update(rs[-keep:])
+    removed = [r for r in runs if r not in keep_set]
     for r in removed:
         shutil.rmtree(r, ignore_errors=True)
     return removed

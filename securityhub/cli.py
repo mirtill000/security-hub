@@ -60,6 +60,9 @@ def _run_cmd(argv: List[str]) -> int:
     from . import orchestrator
     p = Parser(prog="securityhub run", description="Run every enabled module (in parallel, each in its own process with a log), "
                                                    "then rebuild the portal and posture.json")
+    p.add_argument("modules", nargs="*", metavar="MODULE",
+                   help="Only these modules (e.g. 'securityhub run pra'): the portal is rebuilt with their new reports "
+                        "and the latest reports of every other area")
     p.add_argument("-c", "--config", default=DEFAULT_CONFIG, help=f"Configuration file (default: {DEFAULT_CONFIG})")
     p.add_argument("--only", default="", help="Only these modules, comma-separated (e.g. dns,waf,ias)")
     p.add_argument("-o", "--output-dir", help="Override output_dir of the configuration")
@@ -72,7 +75,7 @@ def _run_cmd(argv: List[str]) -> int:
     if not os.path.isfile(a.config):
         print(f"Error: configuration not found: {a.config} (create one with 'securityhub init')", file=sys.stderr)
         return EXIT_USAGE
-    only = [m.strip() for m in a.only.split(",") if m.strip()] or None
+    only = [m.strip() for m in a.only.split(",") + [x for v in a.modules for x in v.split(",")] if m.strip()] or None
     try:
         return orchestrator.run(a.config, only=[ALIASES.get(m, m) for m in only] if only else None,
                                 dry_run=a.dry_run, quiet=a.quiet, output_dir=a.output_dir, verbose=a.verbose and not a.quiet,
