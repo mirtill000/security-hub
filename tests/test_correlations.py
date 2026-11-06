@@ -55,7 +55,7 @@ class PeopleTest(unittest.TestCase):
         # corporate sign-in only (no IAS password): the IdP enforces MFA, nothing to report
         self.assertEqual(codes([pp(vap=["bob@contoso.com"]), ias(("bob@contoso.com", False, False, False))]), [])
         # SAML users of PRA get MFA from the identity provider: not "without MFA", but PRA access is privileged access
-        self.assertEqual(codes([pp(vap=["bob@contoso.com"]), pra(users=[("bob", "bob@contoso.com", "saml", False, False)])]),
+        self.assertEqual(codes([pp(vap=["bob@contoso.com"]), pra(users=[("bob", "bob@contoso.com", "saml", None, False)])]),
                          [("ATTACKED_PRIVILEGED", "bob@contoso.com")])
 
     def test_attacked_privileged_with_mfa_is_a_warning(self):

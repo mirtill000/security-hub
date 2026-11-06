@@ -33,10 +33,12 @@ def generate_html_report(results: List[ObjectResult], account_issues: List[Issue
         + " (each object is scored on the checks that apply to its kind: users and vendor users on authentication, "
           "privileges and lifecycle; assets on access policy and exposure; gateways on exposure; API accounts on "
           "authentication and privileges; vault accounts on rotation and checkout).",
-        "Users signing in through a SAML security provider get MFA from the identity provider, so it is not checked here.",
+        "MFA is evaluated only for local and LDAP users: the API exposes it only for them. Users of SAML or SCIM "
+        "providers (e.g. PRA on Pathfinder with SSO), Kerberos or RADIUS get MFA from their identity provider, so it is "
+        "not reported as missing here: verify it in the IdP (conditional access) and that local sign-in is restricted.",
         f"Inactive = no sign-in for {meta.get('inactive_days')} days. Disabled users are counted but not assessed.",
-        "Read-only: Configuration API (GET only) and the session listing of the Reporting API. E-mail addresses, IP "
-        "addresses, passwords and recordings are not stored.",
+        "Read-only: Configuration API (GET only) and the session listing of the Reporting API. Users' e-mail addresses "
+        "are kept to join the person with the other modules; IP addresses, passwords and recordings are not stored.",
         "Compliance and framework references are indicative.",
     ] + (["Very large site: only the objects that need action are listed; the totals cover every object."]
          if tot.get("limited") else []) + [n for n in meta.get("notes", []) if n]

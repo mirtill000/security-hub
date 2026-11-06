@@ -60,6 +60,31 @@ class AnalysisTest(TempDirTest):
         self.assertIsNone(extra["totals"]["sessions"])
 
 
+    def test_mfa_of_sso_users_is_left_to_the_identity_provider(self):
+        """PRA on Pathfinder with SSO: the API exposes MFA only for local and LDAP users (Configuration API schema)."""
+        snap = snapshot()
+        snap["security_providers"] += [{"id": 3, "type": "scim", "name": "Pathfinder SSO", "enabled": True, "user_authentication": True},
+                                       {"id": 4, "type": "ldap", "name": "AD", "enabled": True, "user_authentication": True},
+                                       {"id": 5, "type": "radius", "name": "RADIUS", "enabled": True, "user_authentication": True}]
+        base = {"enabled": True, "two_factor_type": "optional", "two_factor_enabled": False, "last_authentication": "2026-10-30T08:00:00Z",
+                "created_at": "2025-01-01T00:00:00Z", "perm_admin": False}
+        snap["users"] = [dict(base, id=10, username="sso.admin@contoso.example", security_provider_id=3, perm_admin=True),
+                         dict(base, id=11, username="ldap.user", security_provider_id=4),
+                         dict(base, id=12, username="radius.user", security_provider_id=5)]
+        results, account, _, _ = analyze(snap)
+        r = {x.domain: x for x in results if x.kind == "user"}
+        auth = lambda n: r[n].checks["authentication"]
+        self.assertFalse({"ADMIN_NO_MFA", "USER_NO_MFA"} & {i.code for i in r["sso.admin@contoso.example"].issues})
+        self.assertIsNone(auth("sso.admin@contoso.example").data["mfa"])
+        self.assertEqual(auth("sso.admin@contoso.example").data["mfa_by"], "identity provider (Pathfinder SSO)")
+        self.assertNotIn("USER_NO_MFA", {i.code for i in r["radius.user"].issues})
+        self.assertIn("USER_NO_MFA", {i.code for i in r["ldap.user"].issues})            # LDAP: MFA is set in PRA
+        self.assertIn("POLICY_MFA_OPTIONAL", {i.code for i in account})                   # applies to the LDAP user
+        snap["users"] = snap["users"][:1]                                                 # SSO users only
+        _, account, _, _ = analyze(snap)
+        self.assertNotIn("POLICY_MFA_OPTIONAL", {i.code for i in account})
+
+
 class FakeResponse(io.BytesIO):
     def __init__(self, body, headers=None):
         super().__init__(body)

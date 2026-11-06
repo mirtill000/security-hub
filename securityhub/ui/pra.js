@@ -10,13 +10,13 @@ window.ASSET_NOUN = ['object', 'objects'];
 const ACC = D.account_issues || [], POL = [], TOT = D.totals || {}, SITE = D.site || '';
 const SHORT = {authentication: 'Auth', privileges: 'Privileges', lifecycle: 'Lifecycle', access_policy: 'Policy', exposure: 'Exposure'};
 const DETAIL = {
-  authentication: r => { const d = cd(r, 'authentication'); return d.provider ? d.provider : d.allow_list !== undefined ? (d.allow_list ? 'IP allow list' : 'no allow list') : ''; },
+  authentication: r => { const d = cd(r, 'authentication'); return d.provider ? d.provider + (d.mfa === null && d.provider_type && !['local', 'ldap'].includes(d.provider_type) ? ' (MFA at IdP)' : '') : d.allow_list !== undefined ? (d.allow_list ? 'IP allow list' : 'no allow list') : ''; },
   privileges: r => { const d = cd(r, 'privileges'); return d.admin ? 'admin' : (d.sensitive || []).length ? `${d.sensitive.length} sensitive` : (d.checkout_groups || []).length ? 'checkout' : ''; },
   lifecycle: r => { const d = cd(r, 'lifecycle'); return d.days !== undefined && d.days !== null ? `${d.days}d ago` : d.policy || ''; },
   access_policy: r => cd(r, 'access_policy').policy || (r.kind === 'asset' ? 'no policy' : ''),
   exposure: r => cd(r, 'exposure').type || ''
 };
-const PRA_LABELS = {provider: 'Security provider', provider_type: 'Provider type', mfa: 'MFA', two_factor_type: 'MFA requirement', admin: 'Administrator',
+const PRA_LABELS = {provider: 'Security provider', provider_type: 'Provider type', mfa: 'MFA', mfa_by: 'MFA enforced by', two_factor_type: 'MFA requirement', admin: 'Administrator',
   vault_admin: 'Vault administrator', last_sign_in: 'Last sign-in', days: 'Days since sign-in', created: 'Created', expires: 'Account expiration', vendor: 'Vendor group',
   vendor_admin: 'Vendor administrator', allow_list: 'Network allow list', command: 'Command API', configuration: 'Configuration API', sensitive: 'Sensitive permissions',
   checkout_groups: 'Group policies with checkout', policy: 'Policy', recording: 'Sessions recorded', approval: 'Approval required', schedule: 'Schedule',

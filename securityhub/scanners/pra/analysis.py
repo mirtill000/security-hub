@@ -17,6 +17,10 @@ __all__ = ["analyze_snapshot", "compute_diff"]
 
 TUNNELS = {t for t in ASSET_TYPES if "tunnel" in t}
 SAML_LIKE = {"saml", "ldap", "kerberos", "radius", "scim"}
+# The Configuration API exposes the MFA of a user (two_factor_type / two_factor_required / two_factor_enabled) "only
+# for local and LDAP users". The others (SAML, SCIM - e.g. PRA on Pathfinder with SSO -, Kerberos, RADIUS) authenticate
+# at their identity provider, which enforces MFA: it cannot be read here and is not reported as missing.
+MFA_IN_PRA = {"local", "ldap"}
 
 
 def _days(v, now: datetime) -> Optional[int]:
@@ -139,9 +143,11 @@ def analyze_snapshot(snap: dict, checks: List[str], inactive_days: int = INACTIV
         prov = providers.get(u.get("security_provider_id")) or {}
         ptype = str(prov.get("type") or "local").lower()
         admin = bool(u.get("perm_admin"))
-        mfa = bool(u.get("two_factor_required") or u.get("two_factor_enabled") or (u.get("fido2_credential_count") or 0) > 0)
+        mfa: Optional[bool] = None   # None: enforced by the identity provider, not visible to PRA
+        if ptype in MFA_IN_PRA:
+            mfa = bool(u.get("two_factor_required") or u.get("two_factor_enabled") or (u.get("fido2_credential_count") or 0) > 0)
         auth: List[Issue] = []
-        if not mfa and ptype not in ("saml",):   # SAML users get MFA from the IdP
+        if mfa is False:
             auth.append(make_issue("ADMIN_NO_MFA" if admin else "USER_NO_MFA", f"provider {prov.get('name') or ptype}"))
         if admin and ptype == "local":
             auth.append(make_issue("ADMIN_LOCAL"))
@@ -156,6 +162,7 @@ def analyze_snapshot(snap: dict, checks: List[str], inactive_days: int = INACTIV
             life.append(make_issue("USER_INACTIVE", f"last sign-in {last} days ago"))
         add("user", u.get("id"), u.get("username"), f"{u.get('public_display_name') or ''} · {prov.get('name') or ptype}".strip(" ·"),
             {"authentication": (True, auth, {"provider": prov.get("name") or ptype, "provider_type": ptype, "mfa": mfa,
+                                             "mfa_by": "PRA" if ptype in MFA_IN_PRA else f"identity provider ({prov.get('name') or ptype})",
                                              "two_factor_type": u.get("two_factor_type")}),
              "privileges": (True, priv, {"admin": admin, "vault_admin": bool(u.get("perm_vault"))}),
              "lifecycle": (True, life, {"last_sign_in": u.get("last_authentication"), "days": last, "created": u.get("created_at")})},
@@ -273,7 +280,10 @@ def analyze_snapshot(snap: dict, checks: List[str], inactive_days: int = INACTIV
         account.append(make_issue("LOCAL_AUTH_ONLY"))
     weak = [g.get("name") for g in snap.get("group_policies") or []
             if g.get("perm_access_allowed") and g.get("access_perm_status") != "not_defined" and g.get("two_factor_type") in (None, "optional")]
-    if weak:
+    # the policy MFA setting applies only to local and LDAP users: irrelevant when every user signs in through an IdP
+    pra_auth_users = [u for u in snap.get("users") or [] if u.get("enabled") is not False
+                      and str((providers.get(u.get("security_provider_id")) or {}).get("type") or "local").lower() in MFA_IN_PRA]
+    if weak and pra_auth_users:
         account.append(make_issue("POLICY_MFA_OPTIONAL", f"{len(weak)}: {', '.join(weak[:4])}"))
     noexp = [v.get("name") for v in snap.get("vendors") or [] if not v.get("account_expiration")]
     if noexp:

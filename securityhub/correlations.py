@@ -132,8 +132,8 @@ def _people(reports: List[dict]) -> Dict[str, dict]:
                 person(e)["pra"].append({
                     "row": row, "report": r, "vendor": row.get("kind") == "vendor_user",
                     "admin": bool(priv.get("admin") or priv.get("vault_admin") or priv.get("vendor_admin")),
-                    # SAML users get MFA from the identity provider: not "without MFA" here
-                    "mfa": True if auth.get("provider_type") == "saml" else auth.get("mfa"),
+                    # None for SSO / directory users: MFA is enforced by their identity provider, not "without MFA"
+                    "mfa": auth.get("mfa"),
                 })
     return people
 
