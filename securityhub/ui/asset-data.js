@@ -11,8 +11,9 @@ const ST = {
   valid: ['pass', '\u2713', 'Pass'], warning: ['warn', '!', 'Warning'], partial: ['warn', '\u25D0', 'Partial'],
   error: ['fail', '\u2715', 'Fail'], misconfigured: ['fail', '\u2715', 'Misconfigured'], bogus: ['fail', '\u2715', 'Bogus'],
   missing: ['none', '\u2013', 'Missing'], null: ['null', '\u2205', 'Null'], na: ['na', '\u00B7', 'Not tested'],
-  dns_error: ['dns', '?', 'Read error'], unknown: ['dns', '?', 'Unknown'], skipped: ['na', '\u00B7', 'Skipped']
+  dns_error: ['dns', '?', 'Read error'], unknown: ['dns', '?', 'Not verified'], skipped: ['na', '\u00B7', 'Skipped']
 };
+if (typeof window.ST_LABELS === 'object') Object.entries(window.ST_LABELS).forEach(([k, v]) => { ST[k] = v; });
 const ST_ORDER = ['valid', 'partial', 'warning', 'misconfigured', 'error', 'bogus', 'missing', 'null', 'na', 'dns_error', 'unknown', 'skipped'];
 const TIER_ORDER = ['critical', 'high', 'medium', 'low'];
 const cd = (r, c) => ((r.checks || {})[c] || {}).data || {};

@@ -2,6 +2,7 @@
 
 import json
 import os
+import unittest
 from unittest import mock
 
 from securityhub import cli, doctor, portal
@@ -49,12 +50,30 @@ class DoctorTest(TempDirTest):
             cli.main(["edr", "--from-json", fixture("s1_snapshot.json"), "-o", self.path("edr.html")])
         reports, history = portal.collect([self.path("edr.html")])
         r = reports[0]
-        self.assertEqual(set(r["coverage"]), {"items", "scored", "not_evaluable", "not_evaluable_by_check", "api_errors", "not_configured"})
+        self.assertEqual(set(r["coverage"]), {"items", "scored", "not_evaluable", "not_evaluable_by_check", "read_errors",
+                                              "read_errors_by_check", "not_available", "not_available_by_check", "api_errors", "not_configured"})
+        self.assertEqual(r["coverage"]["not_evaluable"], r["coverage"]["read_errors"] + r["coverage"]["not_available"])
         split = r["split"]
         self.assertGreater(split["exposed"], 0)                           # the endpoint with an active threat
         self.assertIsNotNone(split["hygiene"])
+        self.assertIn("THREAT_ACTIVE", split["codes"])                    # the portal links the report filtered on these
         health = {"doctor": {"generated": "2026-11-06T10:00:00Z", "status": "ok", "modules": {}}}
         portal.build_hub(reports, self.path("hub.html"), "t", history, health=health)
         with open(self.path("hub.html"), encoding="utf-8") as f:
             page = f.read()
         self.assertIn('"health":{"doctor"', page)
+
+
+class CoverageSplitTest(unittest.TestCase):
+    def test_read_errors_and_not_verifiable_are_counted_apart(self):
+        rows = [
+            {"domain": "a", "checks": {"policy": {"status": "unknown", "issues": [{"code": "API_ERROR"}]},          # API failed
+                                       "health": {"status": "unknown", "data": {"not_evaluated": "agent not seen"}}}},  # by design
+            {"domain": "b", "dkim": {"status": "unknown"}, "issues": [{"code": "DKIM_NOT_DECLARED"}],            # not in dkim.csv
+             "spf": {"status": "dns_error"}, "caa": {"status": "unknown"}},
+            {"domain": "c", "dmarc": {"status": "unknown"}, "issues": [{"code": "DMARC_DNS_ERROR"}]},
+        ]
+        c = portal.coverage("edr", {"results": rows})
+        self.assertEqual((c["not_evaluable"], c["read_errors"], c["not_available"]), (6, 3, 3))
+        self.assertEqual(c["read_errors_by_check"], {"policy": 1, "spf": 1, "dmarc": 1})
+        self.assertEqual(c["not_available_by_check"], {"health": 1, "dkim": 1, "caa": 1})

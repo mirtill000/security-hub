@@ -368,7 +368,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 flags = (["STALE"] if r.get("stale") else []) + (["LAST RUN FAILED"] if r.get("last_run_failed") else []) \
                     + ([f"{len(r['api_errors'])} API error(s)"] if r.get("api_errors") else [])
                 print(f"  {area:<11} {str(r.get('age_days')):>5} days old   scored {r.get('scored')}/{r.get('items')}   "
-                      f"checks not evaluable: {r.get('not_evaluable', 0)}   {', '.join(flags)}")
+                      f"read errors: {r.get('read_errors', r.get('not_evaluable', 0))}   not verifiable: {r.get('not_available', 0)}   {', '.join(flags)}")
         print(f"\nOverall: {sym[res['status']].strip()}" + (" - health.json and the Status page of the portal updated" if not a.no_write else ""))
     return EXIT_OK if res["status"] != FAIL else 1
 

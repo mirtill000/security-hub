@@ -8,12 +8,12 @@ R.forEach((r, i) => {
   r._crit = r.issues.filter(x => x.severity === 'critical').length;
   r._warn = r.issues.filter(x => x.severity === 'warning').length;
   r._codes = new Set(r.issues.map(x => x.code));
-  r._st = c => ((r.checks || {})[c] || {}).status || 'skipped';
+  r._st = APP.rowStatus ? (c => APP.rowStatus(r, c)) : (c => ((r.checks || {})[c] || {}).status || 'skipped');
   r._acc = r.account_name || String(r.account_id || '');
 });
-const hasMeta = R.some(r => r.owner || r.bu || (r.tags && r.tags.length)) || new Set(R.map(r => r.tier)).size > 1 || new Set(R.map(r => r.account_id)).size > 1;
+const hasMeta = APP.hasMeta ? APP.hasMeta() : R.some(r => r.owner || r.bu || (r.tags && r.tags.length)) || new Set(R.map(r => r.tier)).size > 1 || new Set(R.map(r => r.account_id)).size > 1;
 const diff = D.diff;
-const hasReports = false, hasLook = false, hasAuth = false;
+const hasReports = !!APP.hasReports, hasLook = !!APP.hasLook, hasAuth = !!APP.hasAuth;
 const uniq = a => [...new Set(a.filter(Boolean))].sort();
 const domSub = APP.domSub;
 
@@ -45,8 +45,8 @@ const PREF_KEY = APP.tool.toLowerCase() + '-prefs-v1';
 const P = {density: 'comfortable', view: 'table', size: 50, hidden: []};
 try { Object.assign(P, JSON.parse(localStorage.getItem(PREF_KEY) || '{}')); } catch (e) { /* storage unavailable */ }
 const savePrefs = () => { try { localStorage.setItem(PREF_KEY, JSON.stringify(P)); } catch (e) { /* ignore */ } };
-const FKEYS = ['q', 'score', 'smin', 'smax', 'tier', 'owner', 'bu', 'tag', 'finding', 'changed', 'comp', 'profile', 'account', 'policy'];
-const blank = () => ({q: '', f: {}, score: '', smin: '', smax: '', tier: '', owner: '', bu: '', tag: '', finding: '', changed: '', comp: '', profile: '', account: '', policy: ''});
+const FKEYS = ['q', 'score', 'smin', 'smax', 'tier', 'owner', 'bu', 'tag', 'finding', 'changed', 'comp', 'profile', 'account', 'policy', 'any'];
+const blank = () => ({q: '', f: {}, score: '', smin: '', smax: '', tier: '', owner: '', bu: '', tag: '', finding: '', changed: '', comp: '', profile: '', account: '', policy: '', any: ''});
 const S = Object.assign({route: 'overview', sort: {k: 'priority', d: -1}, page: 1, open: null, dtab: 'overview', sel: new Set(),
   groupBy: new Set(R.map(r => r.account_id)).size > 1 ? 'account' : hasMeta ? 'owner' : 'tier', cursor: -1, menu: null, filtersOpen: false, fsev: '', fq: '', lmx: false, overlay: null}, blank());
 
@@ -57,14 +57,16 @@ const ROUTES = [
   {id: 'findings', label: 'Findings', icon: 'alert', show: () => true, count: () => findingCounts().length},
   {id: 'policies', label: APP.policies.label, icon: 'shield', show: APP.policies.show, count: APP.policies.count},
   {id: 'changes', label: 'Changes', icon: 'diff', show: () => !!diff, count: () => R.filter(r => r.change && r.change.changed).length},
-  {id: 'groups', label: 'Groups', icon: 'layers', show: () => hasMeta}
+  {id: 'groups', label: 'Groups', icon: 'layers', show: () => hasMeta},
+  ...(APP.routes || [])
 ];
 window.addEventListener('popstate', () => { fromHash(); render(); });
 
 /* ================= filtering ================= */
 function matches(r) {
   const q = S.q.trim().toLowerCase();
-  if (q && !(r.domain.includes(q) || String(r.site_id).includes(q) || r._acc.toLowerCase().includes(q) || (r.owner || '').toLowerCase().includes(q) || (r.bu || '').toLowerCase().includes(q)
+  if (q && APP.search && !APP.search(r, q)) return false;
+  if (q && !APP.search && !(r.domain.includes(q) || String(r.site_id).includes(q) || r._acc.toLowerCase().includes(q) || (r.owner || '').toLowerCase().includes(q) || (r.bu || '').toLowerCase().includes(q)
       || (r.tags || []).some(t => t.toLowerCase().includes(q)))) return false;
   for (const c of CHECKS) if (S.f[c] && r._st(c) !== S.f[c]) return false;
   const sc = r.overall_score;
@@ -76,6 +78,7 @@ function matches(r) {
   if (S.bu && r.bu !== S.bu) return false;
   if (S.tag && !(r.tags || []).includes(S.tag)) return false;
   if (S.finding && !r._codes.has(S.finding)) return false;
+  if (S.any && !S.any.split(',').some(c => r._codes.has(c))) return false;   // e.g. active exposure, from the portal
   if (S.changed && !(r.change && r.change.changed)) return false;
   if (S.profile && r.profile !== S.profile) return false;
   if (S.account && r._acc !== S.account) return false;
@@ -99,6 +102,7 @@ function chips() {
   if (S.bu) out.push(['bu', `Unit ${S.bu}`]);
   if (S.tag) out.push(['tag', `Tag ${S.tag}`]);
   if (S.finding) out.push(['finding', findingTitle(S.finding)]);
+  if (S.any) { const cs = S.any.split(','); out.push(['any', cs.length === 1 ? findingTitle(cs[0]) : `Active exposure (${cs.map(findingTitle).join(', ')})`]); }
   if (S.changed) out.push(['changed', 'Changed since baseline']);
   if (S.profile) out.push(['profile', APP.profiles[S.profile] || S.profile]);
   if (S.account) out.push(['account', `${APP.accountLabel} ${S.account}`]);
@@ -170,18 +174,19 @@ function overview() {
       return `<button class="c-${st(s)[0]}" style="flex:${counts[s]}" data-check="${c}" data-status="${s}" title="${esc(lbl)}" aria-label="${esc(lbl)}"></button>`; }).join('');
     return `<div class="cov-row"><span>${esc(L[c])}</span><div class="cov-bar">${segs}</div><span class="cov-num">${pct(counts.valid || 0, n)}%</span></div>`;
   }).join('');
-  const LEG = {pass: 'Pass', warn: 'Warning or partial', fail: 'Fail', none: 'Missing', null: 'Null', na: 'Not tested', dns: 'Read error'};
+  const LEG = Object.assign({pass: 'Pass', warn: 'Warning or partial', fail: 'Fail', none: 'Missing', null: 'Null', na: 'Not tested', dns: 'Read error or not verified'}, APP.legend || {});
   h += `<section class="card span2"><header><h2>Control coverage</h2><p>Share of ${noun(2)} passing each control (where it applies). Select a segment to list them.</p></header>
     <div class="body"><div class="cov">${rows}</div><div class="legend">${Object.keys(LEG).filter(k => present.has(k)).map(k => `<span><i class="dot c-${k}"></i>${LEG[k]}</span>`).join('')}</div></div></section>`;
   // distribution
-  const bins = Array(10).fill(0);
-  live.forEach(r => { bins[Math.min(9, Math.floor(r.overall_score / 10))]++; });
+  // 20 bins of 5 points, so the colour bands match the score bands exactly (75+ pass, 50 to 74 warning, under 50 fail)
+  const bins = Array(20).fill(0);
+  live.forEach(r => { bins[Math.min(19, Math.floor(r.overall_score / 5))]++; });
   const max = Math.max(1, ...bins);
-  const bars = bins.map((v, i) => { const hh = Math.max(v ? 3 : 0, Math.round(104 * v / max)), x = 14 + i * 37, y = 118 - hh;
-    const col = i >= 8 ? 'var(--pass)' : i >= 5 ? 'var(--warn)' : 'var(--fail)';
-    const lo = i * 10, hiB = i === 9 ? 100 : i * 10 + 9;
-    return `<rect class="hbar" x="${x}" y="${y}" width="31" height="${hh}" rx="3" fill="${col}" data-smin="${lo}" data-smax="${hiB}" tabindex="0" role="button" aria-label="${v} ${noun(v)} scoring ${lo} to ${hiB}"><title>${v} ${noun(v)}, score ${lo}-${hiB}</title></rect>
-      ${v ? `<text class="v" x="${x + 15.5}" y="${y - 4}" text-anchor="middle">${v}</text>` : ''}<text x="${x + 15.5}" y="134" text-anchor="middle">${lo}</text>`; }).join('');
+  const bars = bins.map((v, i) => { const hh = Math.max(v ? 3 : 0, Math.round(104 * v / max)), x = 12 + i * 18.6, y = 118 - hh;
+    const lo = i * 5, hiB = i === 19 ? 100 : lo + 4;
+    const col = lo >= 75 ? 'var(--pass)' : lo >= 50 ? 'var(--warn)' : 'var(--fail)';
+    return `<rect class="hbar" x="${x.toFixed(1)}" y="${y}" width="15" height="${hh}" rx="2" fill="${col}" data-smin="${lo}" data-smax="${hiB}" tabindex="0" role="button" aria-label="${v} ${noun(v)} scoring ${lo} to ${hiB}"><title>${v} ${noun(v)}, score ${lo}-${hiB}</title></rect>
+      ${v ? `<text class="v" x="${(x + 7.5).toFixed(1)}" y="${y - 4}" text-anchor="middle">${v}</text>` : ''}${i % 2 === 0 || i === 15 ? `<text x="${(x + 7.5).toFixed(1)}" y="134" text-anchor="middle">${lo}</text>` : ''}`; }).join('');
   h += `<section class="card"><header><h2>Score distribution</h2></header><div class="body"><svg class="hist" viewBox="0 0 390 140" role="group" aria-label="Score distribution"><line x1="10" y1="118.5" x2="384" y2="118.5"/>${bars}</svg><p class="sub" style="margin-top:6px">Select a bar to list the ${noun(2)} in that range.</p></div></section>`;
   // fix first
   const risks = [...R].filter(r => r.priority > 0).sort((a, b) => b.priority - a.priority).slice(0, 6);
@@ -220,6 +225,7 @@ function overview() {
       <button class="stat" data-route="changes"><b>${diff.new_critical}</b><span>new critical findings</span></button>
       <button class="stat" data-route="changes"><b>${diff.new_domains.length}/${diff.removed_domains.length}</b><span>${noun(2)} added/removed</span></button></div></div></section>`;
 
+  if (APP.overviewExtra) h += APP.overviewExtra();
   if (ACC.length) h += `<section class="card span3"><header><h2>${esc(APP.accTitle)}</h2><p>${ACC.length} item${ACC.length === 1 ? '' : 's'} ${esc(APP.accSub)}</p><span class="act"><button class="link" data-route="policies">${esc(APP.policies.label)}</button></span></header><div class="body">${issueList(ACC.slice(0, 6))}</div></section>`;
   return h + '</div>';
 }
@@ -276,7 +282,7 @@ function heatmap(items) {
   return `<div class="heat" style="--cols:${CHECKS.length}" role="table" aria-label="Security heatmap">
     <div class="heat-row heat-head" role="row"><div role="columnheader">${cap(noun(1))}</div>${CHECKS.map(c => `<div role="columnheader" title="${esc(L[c])}">${esc(SHORT[c] || L[c])}</div>`).join('')}<div role="columnheader" style="text-align:right">Score</div></div>
     ${items.map(r => `<div class="heat-row" role="row"><button class="dom" role="rowheader" data-open="${r._i}" title="${esc(r.domain)}">${esc(r.domain)}</button>
-      ${CHECKS.map(c => { const s = r._st(c), m = st(s), det = DETAIL[c] ? DETAIL[c](r) : '';
+      ${CHECKS.map(c => { const s = r._st(c), m = st(s), det = detailOf(r, c);
         const lbl = `${r.domain}, ${L[c]}: ${m[2]}${det ? ', ' + det : ''}`;
         return `<button class="cell c-${m[0]}" role="cell" data-open="${r._i}" data-dtab="${tabFor(c)}" title="${esc(lbl)}" aria-label="${esc(lbl)}">${m[1]}</button>`; }).join('')}
       <span class="score ${scoreCls(r.overall_score)}" role="cell">${r.overall_score}</span></div>`).join('')}</div>`;
@@ -306,7 +312,8 @@ const DTABS = [
   {id: 'findings', label: 'Findings', show: () => true, n: r => r.issues.length},
   {id: 'fixes', label: 'Fixes', show: r => (r.remediation || []).length > 0, n: r => r.remediation.length},
   {id: 'config', label: APP.config.label, show: r => CONFIG.some(c => vis(r, c))},
-  {id: 'exposure', label: APP.exposure.label, show: r => EXPOSURE.some(c => vis(r, c))}
+  {id: 'exposure', label: APP.exposure.label, show: APP.exposure.show || (r => EXPOSURE.some(c => vis(r, c)))},
+  ...(APP.tabs || []).map(t => ({id: t.id, label: t.label, show: t.show, n: t.n}))
 ];
 const yesNo = v => v === true ? 'Yes' : v === false ? 'No' : (v === null || v === undefined ? '' : String(v));
 function tabOverview(r) {
@@ -315,13 +322,13 @@ function tabOverview(r) {
   let h = `<div class="dr-cols">${sec('score', 'How the score is built', `${comps.map(([c, v]) => `<div class="bar-row"><span>${esc(L[c])}</span>
       <span class="bar"><i class="b-${v.got >= v.max ? 'pass' : v.got > 0 ? 'warn' : 'fail'}" style="width:${pct(v.got, v.max)}%"></i></span><span>${v.got}/${v.max}</span></div>`).join('')}
       ${b.normalized ? `<p class="sub" style="margin-top:8px">Normalized to 100 over the evaluated checks (${b.max} points available).</p>` : ''}
-      ${b.cap ? `<p class="note-box" style="margin-top:10px">${esc(b.cap)}</p>` : ''}`)}
+      ${b.cap ? `<p class="note-box" style="margin-top:10px">${esc(b.cap)}</p>` : ''}${b.note ? `<p class="sub">${esc(b.note)}</p>` : ''}`)}
     ${sec('compliance', 'Requirements', comp.length ? comp.map(([k, v]) => `<div class="bar-row" style="grid-template-columns:1fr auto" title="${esc(COMP[k][1])}"><span>${esc(COMP[k][0])}</span>${pill({pass: 'valid', fail: 'error', unknown: 'unknown'}[v] || 'na')}</div>`).join('')
-      + `<p class="sub" style="margin-top:8px">Indicative: ${esc(APP.indicative)}</p>` : '<p class="muted">Not applicable to the selected checks.</p>')}</div>`;
-  h += sec('controls', 'Controls', `<div class="ctl-grid">${CHECKS.filter(c => vis(r, c)).map(c => `<button class="ctl" data-dtab="${tabFor(c)}" data-anchor="${c}"><span>${esc(L[c])}</span>${pill(r._st(c), DETAIL[c] ? DETAIL[c](r) : '')}</button>`).join('')}</div>`);
+      + `<p class="sub" style="margin-top:8px">${esc(APP.complianceNote || 'Indicative: ' + APP.indicative)}</p>` : '<p class="muted">Not applicable to the selected checks.</p>')}</div>`;
+  h += sec('controls', 'Controls', `<div class="ctl-grid">${CHECKS.filter(c => vis(r, c)).map(c => `<button class="ctl" data-dtab="${tabFor(c)}" data-anchor="${c}"><span>${esc(L[c])}</span>${pill(r._st(c), detailOf(r, c))}</button>`).join('')}</div>`);
   if (r.change && r.change.changed) {
     const c = r.change;
-    h += sec('changes', 'Since the baseline', c.new ? '<p>New ${noun(1)} in this scan.</p>' : `<p>Score <span class="num">${esc(c.previous_score)}</span> to ${scoreHtml(r.overall_score)} ${deltaHtml(r)}</p>
+    h += sec('changes', 'Since the baseline', c.new ? `<p>New ${noun(1)} in this scan.</p>` : `${c.previous_score === null || c.previous_score === undefined ? '' : `<p>Score <span class="num">${esc(c.previous_score)}</span> to ${scoreHtml(r.overall_score)} ${deltaHtml(r)}</p>`}
       ${c.status_changes.map(s => `<div style="margin-top:6px">${esc(L[s.check] || s.check)} ${pill(s.from)} ${pill(s.to)}</div>`).join('')}
       ${c.new_issues.length ? `<p style="margin-top:10px"><b>New:</b> ${c.new_issues.map(x => esc(findingTitle(x))).join(', ')}</p>` : ''}
       ${c.resolved_issues.length ? `<p style="margin-top:6px"><b>Resolved:</b> ${c.resolved_issues.map(x => esc(findingTitle(x))).join(', ')}</p>` : ''}`);
@@ -337,6 +344,7 @@ function tabFindings(r) {
     return xs.length ? sec('issues-' + s, `${s[0].toUpperCase() + s.slice(1)} (${xs.length})`, issueList(xs)) : ''; }).join('');
 }
 function tabFixes(r) {
+  if (APP.fixes) return APP.fixes(r);
   return sec('fixes', 'Suggested fixes', `<p class="sub" style="margin-bottom:12px">${esc(APP.fixesIntro)}</p>` +
     r.remediation.map((x, k) => `<div class="fix"><h4>${esc(x.title)}</h4><div class="where">${esc(x.type)}, <span class="mono">${esc(x.name)}</span></div>
       ${x.value ? `<div class="rowx"><pre class="record" id="fix-${r._i}-${k}">${esc(x.value)}</pre><button class="btn small copy" data-copy="fix-${r._i}-${k}">${icon('copy', 14)}Copy</button></div>` : ''}
@@ -344,7 +352,8 @@ function tabFixes(r) {
 }
 function tabConfig(r) { return APP.config.render(r); }
 function tabExposure(r) { return APP.exposure.render(r); }
-const TAB_RENDER = {overview: tabOverview, findings: tabFindings, fixes: tabFixes, config: tabConfig, exposure: tabExposure};
+const TAB_RENDER = Object.assign({overview: tabOverview, findings: tabFindings, fixes: tabFixes, config: tabConfig, exposure: tabExposure},
+  Object.fromEntries((APP.tabs || []).map(t => [t.id, t.render])));
 let lastOpen = null, lastAnchor = null;
 function drawer() {
   const root = $('#drawer-root');
@@ -355,6 +364,7 @@ function drawer() {
   }
   const r = R[S.open], lst = list(), pos = lst.findIndex(x => x._i === r._i);
   const prev = pos > 0 ? lst[pos - 1]._i : null, next = pos >= 0 && pos < lst.length - 1 ? lst[pos + 1]._i : null;
+  if (S.dtab === 'evidence') S.dtab = 'config';  // older links to the DNS report
   const tabs = DTABS.filter(t => t.show(r));
   if (S.dtab !== 'all' && !tabs.some(t => t.id === S.dtab)) S.dtab = 'overview';
   const badge = APP.badges[r.profile];
@@ -370,7 +380,7 @@ function drawer() {
           <button class="btn ghost small" data-action="print-domain">${icon('print', 14)}Print</button>
           <button class="btn icon ghost" data-action="close" id="dr-close" aria-label="Close" title="Close (Esc)">${icon('x')}</button></div>
         <div class="dr-id">${ring(r.overall_score)}<div style="min-width:0"><h2 id="dr-title">${esc(r.domain)}</h2>
-          <div class="meta">${hasMeta ? tierTag(r.tier) : ''}${badge ? `<span class="tag tier-critical">${esc(badge)}</span>` : ''}${APP.metaTags(r)}
+          <div class="meta">${hasMeta ? tierTag(r.tier) : ''}${badge ? `<span class="tag${APP.badgeNeutral ? '' : ' tier-critical'}">${esc(badge)}</span>` : ''}${APP.metaTags(r)}
             ${r.owner ? `<span class="tag">Owner ${esc(r.owner)}</span>` : ''}${(r.tags || []).map(t => `<span class="tag">#${esc(t)}</span>`).join('')}<span class="t">Grade ${gradeOf(r.overall_score)}, priority ${r.priority}${APP.metaNote ? APP.metaNote(r) : ''}</span></div>
           ${r.error ? `<p class="note-box" style="margin-top:8px">${esc(r.error)}</p>` : ''}</div></div>
         <nav class="dr-tabs" role="tablist">${tabs.map(t => `<button role="tab" data-dtab="${t.id}" aria-selected="${S.dtab === t.id}">${esc(t.label)}${t.n ? `<span class="n">${t.n(r)}</span>` : ''}</button>`).join('')}</nav>
@@ -388,7 +398,7 @@ function paletteItems(q) {
   q = q.trim().toLowerCase();
   const items = [];
   ROUTES.filter(x => x.show()).forEach(x => { if (!q || x.label.toLowerCase().includes(q)) items.push({g: 'Go to', t: x.label, h: '', run: () => go({route: x.id, open: null})}); });
-  const doms = (q ? R.filter(r => r.domain.includes(q) || String(r.site_id).includes(q) || (r.owner || '').toLowerCase().includes(q)) : [...R].sort((a, b) => b.priority - a.priority)).slice(0, q ? 8 : 5);
+  const doms = (q ? R.filter(r => APP.search ? APP.search(r, q) : r.domain.includes(q) || String(r.site_id).includes(q) || (r.owner || '').toLowerCase().includes(q)) : [...R].sort((a, b) => b.priority - a.priority)).slice(0, q ? 8 : 5);
   doms.forEach(r => items.push({g: cap(noun(2)), t: r.domain, h: `score ${r.overall_score}`, run: () => go({open: r._i, dtab: 'overview'})}));
   findingCounts().filter(([c]) => q && findingTitle(c).toLowerCase().includes(q)).slice(0, 6).forEach(([c, k]) =>
     items.push({g: 'Findings', t: findingTitle(c), h: `${k} ${noun(k)}`, run: () => filterTo({finding: c})}));
@@ -434,7 +444,7 @@ window.addEventListener('afterprint', () => {
 });
 
 /* ================= render ================= */
-const VIEWS = {overview, domains, findings, changes, groups, policies};
+const VIEWS = Object.assign({overview, domains, findings, changes, groups, policies}, APP.views || {});
 function render() {
   applyTheme();
   $('#side').innerHTML = side();
@@ -481,7 +491,7 @@ document.addEventListener('click', e => {
     'overlay-close': closeOverlay, 'print-exec': printExec, 'print-domain': printDomain, 'copy-link': () => { S.menu = null; copyLink(); render(); },
     filters: () => { S.filtersOpen = !S.filtersOpen; render(); }, clear: () => filterTo({}),
     csv: () => { S.menu = null; exportCsv(list()); render(); }, json: () => { S.menu = null; exportJson(list()); render(); },
-    'csv-sel': () => { S.menu = null; exportCsv(R.filter(r => S.sel.has(r._i)), 'edrguard-selected.csv'); render(); },
+    'csv-sel': () => { S.menu = null; exportCsv(R.filter(r => S.sel.has(r._i)), APP.csv.selected || APP.tool.toLowerCase() + '-selected.csv'); render(); },
     'copy-list': () => { S.menu = null; copyText(list().map(r => r.domain).join('\n'), `${list().length} ${APP.copyNoun} copied`); render(); },
     'copy-sel': () => copyText(R.filter(r => S.sel.has(r._i)).map(r => r.domain).join('\n'), `${S.sel.size} ${APP.copyNoun} copied`),
     'sel-clear': () => { S.sel.clear(); render(); }, 'cols-reset': () => { P.hidden = []; savePrefs(); render(); }

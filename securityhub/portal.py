@@ -153,28 +153,47 @@ def hygiene_exposure(kind: str, payload: dict) -> Optional[dict]:
     return {"hygiene": round(hyg) if hyg is not None else None, "hygiene_items": len(hyg_rows),
             "exposed": len(exposed), "assessed": len(rows), "exposed_pct": _pct(len(exposed), len(rows)),
             "org_exposures": [{"code": i.get("code"), "message": i.get("message")} for i in org[:10]],
-            "by_code": by_code.most_common(8)}
+            "by_code": by_code.most_common(8), "codes": sorted(by_code)}
 
 
 NOT_EVALUABLE = {"unknown", "dns_error"}
 
 
+def _read_error(check: dict, status: str, row_codes: set, prefix: str) -> bool:
+    """True when a check is not evaluable because something could not be read (API or DNS error), False when the data
+    simply does not exist by design (a DKIM record not listed in dkim.csv, an agent not seen for weeks, a tenant that
+    does not expose the data)."""
+    if status == "dns_error":
+        return True
+    codes = {str(i.get("code") or "") for i in check.get("issues") or [] if isinstance(i, dict)}
+    if any(c.endswith("ERROR") for c in codes) or (check.get("data") or {}).get("error"):
+        return True
+    return any(c.startswith(prefix) and c.endswith("ERROR") for c in row_codes)
+
+
 def coverage(kind: str, payload: dict) -> dict:
-    """How much of an area was really measured: items scored, checks that could not be evaluated, API errors."""
+    """How much of an area was really measured: items scored, checks that could not be evaluated - split into read errors
+    (API or DNS) and data not available by design - API errors."""
     rows = payload.get("results") or []
     missing: Counter = Counter()
+    errors: Counter = Counter()
     for r in rows:
-        for c, v in (r.get("checks") or {}).items():
-            status = v.get("status") if isinstance(v, dict) else None
+        row_codes = {str(i.get("code") or "") for i in r.get("issues") or [] if isinstance(i, dict)}
+        found = [(c, v) for c, v in (r.get("checks") or {}).items() if isinstance(v, dict)]
+        found += [(c, r[c]) for c in ("mx", "spf", "dkim", "dmarc", "mta_sts", "tls_rpt", "dnssec", "caa", "takeover", "axfr", "consistency")
+                  if isinstance(r.get(c), dict)]                                           # MailGuard rows
+        for c, v in found:
+            status = v.get("status")
             if status in NOT_EVALUABLE:
                 missing[c] += 1
-        for c in ("spf", "dkim", "dmarc", "mta_sts", "tls_rpt", "dnssec", "caa", "takeover", "axfr"):   # MailGuard rows
-            v = r.get(c)
-            if isinstance(v, dict) and v.get("status") in NOT_EVALUABLE:
-                missing[c] += 1
+                if _read_error(v, status, row_codes, c.upper().replace("-", "").replace("_", "") + "_"):
+                    errors[c] += 1
+    unavailable = missing - errors
     issues = payload.get("account_issues") or []
     return {"items": len(rows), "scored": sum(1 for r in rows if _scored(kind, r)),
             "not_evaluable": sum(missing.values()), "not_evaluable_by_check": dict(missing.most_common(10)),
+            "read_errors": sum(errors.values()), "read_errors_by_check": dict(errors.most_common(10)),
+            "not_available": sum(unavailable.values()), "not_available_by_check": dict(unavailable.most_common(10)),
             "api_errors": [i.get("message") for i in issues if str(i.get("code") or "").endswith("API_ERROR")][:10],
             "not_configured": [i.get("message") for i in issues if str(i.get("code") or "").endswith("NOT_CONFIGURED")]}
 

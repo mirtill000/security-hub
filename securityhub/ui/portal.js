@@ -7,6 +7,7 @@ const ESC = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
 const $ = (s, r) => (r || document).querySelector(s);
 const scoreCls = n => n === null || n === undefined ? '' : n >= 75 ? 'hi' : n >= 50 ? 'mid' : 'lo';
 const ICONS = {
+  key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M14 9l2 2"/>',
   pulse: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
   grid: '<path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/>', shield: '<path d="M12 3 4 6v6c0 5 3.4 8.6 8 9.5 4.6-.9 8-4.5 8-9.5V6l-8-3z"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
   pra: '<rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v2"/>', ias: '<circle cx="9" cy="8" r="3.5"/><path d="M3 20c.8-3.4 3.2-5.5 6-5.5s4.4 1.4 5.3 3M15.5 14.5h5v5h-5zM16.5 14.5v-1.5a1.5 1.5 0 0 1 3 0v1.5"/>', proofpoint: '<path d="M3 6h18v12H3zM3 7l9 6 9-6"/><path d="M12 3l7 3v0"/>', edr: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4M9.5 10l2 2 3.5-3.5"/>', email: '<path d="M3 5h18v14H3zM3 6l9 7 9-7"/>', dns: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/>', waf: '<path d="M4 6h16M4 12h16M4 18h16M8 6v6M16 12v6M12 18v-6"/>', zta: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.2-3.6 4-5.5 7-5.5s5.8 1.9 7 5.5"/>',
@@ -279,6 +280,12 @@ function healthState() {
   const docFail = DOC && DOC.status === 'fail', stale = RP.some(r => r.stale) || Object.keys(M.failed || {}).length;
   return docFail || failedRun ? 'fail' : (DOC && DOC.status === 'warn') || stale ? 'warn' : DOC ? 'ok' : null;
 }
+function credBadge(r) {   // the doctor found a failing or doubtful credential / API for this area
+  const m = DOC && DOC.modules ? DOC.modules[r.type] || (r.type === 'email' ? DOC.modules.dns : null) : null;
+  if (!m || (m.status !== 'fail' && m.status !== 'warn')) return '';
+  const bad = (m.checks || []).filter(c => c.status === m.status).map(c => c.check + ': ' + c.detail).join('; ');
+  return `<button class="pill s-${m.status === 'fail' ? 'fail' : 'warn'} cred-badge" data-status title="${esc((m.status === 'fail' ? 'Credential or API failing' : 'Credential or API warning') + (bad ? ': ' + bad : '') + '. Opens the Status page.')}">${icon('key', 12)}${m.status === 'fail' ? 'Credentials' : 'Check API'}</button> `;
+}
 function healthBadge() { const st = healthState(); return st && st !== 'ok' ? `<span class="count"><span class="pill s-${H_ST[st][1]}" style="padding:0 6px">${st === 'fail' ? '!' : '?'}</span></span>` : ''; }
 function statusView() {
   const areas = RP.filter(r => r.type !== 'other');
@@ -292,13 +299,14 @@ function statusView() {
       <td>${d ? hPill(d.status) : '<span class="faint">not checked</span>'}</td><td>${runCell}</td>
       <td class="nowrap">${esc(fmtD(r.date))}${r.stale ? ' <span class="pill s-warn">stale</span>' : ''}</td>
       <td class="r num">${c.items === undefined ? '-' : `${esc(c.scored)}/${esc(c.items)}`}</td>
-      <td class="r num${c.not_evaluable ? ' tx-warn' : ''}" title="${esc(Object.entries(c.not_evaluable_by_check || {}).map(([k, n]) => k + ': ' + n).join(', '))}">${c.not_evaluable === undefined ? '-' : esc(c.not_evaluable)}</td>
+      ${['read_errors', 'not_available'].map((k, i) => { const v = c[k] === undefined ? (i ? undefined : c.not_evaluable) : c[k];
+        return `<td class="r num${v ? (i ? ' faint' : ' tx-warn') : ''}" title="${esc(Object.entries(c[k + '_by_check'] || (i ? {} : c.not_evaluable_by_check) || {}).map(([x, n]) => x + ': ' + n).join(', '))}">${v === undefined ? '-' : esc(v)}</td>`; }).join('')}
       <td class="sub">${(c.api_errors || []).length ? `<span class="tx-bad">${esc(c.api_errors.join('; '))}</span>` : ''}${(c.not_configured || []).length ? `<div class="faint">${esc(c.not_configured.join('; '))}</div>` : ''}${!(c.api_errors || []).length && !(c.not_configured || []).length ? '<span class="faint">none</span>' : ''}</td></tr>`; }).join('');
   const docHtml = DOC ? Object.entries(DOC.modules || {}).map(([k, m]) => `<section class="card" style="margin-bottom:12px"><header><h2>${esc(m.label)}</h2><span class="act">${hPill(m.status)}</span></header><div class="body"><table class="keys">
       ${m.checks.map(c => `<tr><td>${hPill(c.status)}</td><td><b>${esc(c.check)}</b></td><td class="sub">${esc(c.detail)}${c.hint && (c.status === 'fail' || c.status === 'warn') ? `<div class="tx-warn">${esc(c.hint)}</div>` : ''}</td></tr>`).join('')}</table></div></section>`).join('')
     : '<section class="card"><div class="body muted">Credentials and APIs not checked yet: run <span class="mono">securityhub doctor</span> on the server. The page is updated at once.</div></section>';
   return `<div class="section-title"><h2>Modules</h2><p>Last data of each area: how much was really measured, and what could not be read</p></div>
-    <div class="grid-wrap"><table class="grid"><thead><tr><th class="sticky">Area</th><th>Credentials and API</th><th>Last run</th><th>Data</th><th class="r">Items scored</th><th class="r">Checks not evaluable</th><th>API errors / not configured</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="grid-wrap"><table class="grid"><thead><tr><th class="sticky">Area</th><th>Credentials and API</th><th>Last run</th><th>Data</th><th class="r">Items scored</th><th class="r" title="Checks not evaluated because an API or DNS answer could not be read">Read errors</th><th class="r" title="Checks that cannot be verified by design: e.g. DKIM for a domain not listed in dkim.csv, agents not seen for weeks, data the tenant does not expose">Not verifiable</th><th>API errors / not configured</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="section-title" style="margin-top:20px"><h2>Credentials and APIs</h2><p>${DOC ? `securityhub doctor, ${esc(fmtD(DOC.generated))}${docAge !== null && docAge > 48 ? ` <span class="pill s-warn">${docAge} hours ago</span>` : ''}: one read-only call per module` : 'Not checked yet'}</p></div>${docHtml}`;
 }
 function splitHtml(r) {
@@ -306,9 +314,10 @@ function splitHtml(r) {
   if (!x) return '';
   const noun = (NOUN[r.type] || ['item', 'items'])[x.assessed === 1 ? 0 : 1];
   const orgN = (x.org_exposures || []).length;
-  return `<div class="area-split" title="Hygiene: configuration checks only. Active exposure: items with a threat, an allowed click, an account without MFA, a bypass...">
-    <div><span>Hygiene</span><p><b class="score ${scoreCls(x.hygiene)}">${x.hygiene === null || x.hygiene === undefined ? '-' : esc(x.hygiene)}</b><small>/100</small></p></div>
-    <div><span>Active exposure</span><p><b class="${x.exposed || orgN ? 'tx-bad' : 'tx-good'}">${esc(x.exposed)}</b><small> of ${esc(x.assessed)} ${esc(noun)}${orgN ? ` + ${orgN} org.` : ''}</small></p></div></div>`;
+  const expH = (x.codes || []).length ? '#/domains?any=' + encodeURIComponent(x.codes.join(',')) : '#/findings';
+  return `<div class="area-split">
+    <button class="area-split-btn" data-go="${esc(r.id)}" data-h="#/overview" title="Hygiene: configuration checks only, without the caps set by exposures. Opens the report overview."><span>Hygiene</span><p><b class="score ${scoreCls(x.hygiene)}">${x.hygiene === null || x.hygiene === undefined ? '-' : esc(x.hygiene)}</b><small>/100</small></p></button>
+    <button class="area-split-btn" data-go="${esc(r.id)}" data-h="${esc(expH)}" title="Active exposure: items with a threat, an allowed click, an account without MFA, a bypass... Opens the report filtered on them."><span>Active exposure</span><p><b class="${x.exposed || orgN ? 'tx-bad' : 'tx-good'}">${esc(x.exposed)}</b><small> of ${esc(x.assessed)} ${esc(noun)}${orgN ? ` + ${orgN} org.` : ''}</small></p></button></div>`;
 }
 
 /* ---------- state & routing: #/overview, #/trends, #/assets[?a=<asset>|?f=<filter>] or #/r/<id>?h=<report hash> ---------- */
@@ -423,7 +432,7 @@ function overview() {
       ${v !== null && (k.unit === '%' || k.unit === '/100') ? `<span class="exec-bar"><i style="width:${Math.max(0, Math.min(100, v))}%"></i>${k.target ? `<em style="left:${k.target}%" title="Target ${k.target}"></em>` : ''}</span>` : ''}
       <span class="exec-kpi-det">${esc(k.detail)}</span>${spark(seriesFor(k.key, k.r))}${histDelta(seriesFor(k.key, k.r)) || trendChip(k.trend, k.unit === '/100' ? ' pts' : '')}</button>`; }).join('')}</div>` : '';
   const areaHtml = `<div class="exec-areas">${RP.map(r => { const x = r.exec, st = AREA_ST[(x || {}).status || 'unknown'];
-    return `<section class="card exec-area"><header><span class="hub-type">${icon(r.type)}${esc(r.label)}</span><span class="act"><span class="pill s-${st[1]}">${esc(st[0])}</span></span></header>
+    return `<section class="card exec-area"><header><span class="hub-type">${icon(r.type)}${esc(r.label)}</span><span class="act">${credBadge(r)}<span class="pill s-${st[1]}">${esc(st[0])}</span></span></header>
       <div class="body"><div class="exec-area-head"><span class="letter g-${esc(r.grade)}">${esc(r.grade)}</span><div><b class="num">${r.score === null || r.score === undefined ? '-' : esc(r.score)}<small>/100</small></b>
         <div class="lbl">${esc(r.subtitle || r.title)}</div>${splitHtml(r)}${r.score_cap ? `<div class="lbl tx-warn" title="${esc(r.score_cap)}">${esc(r.score_cap)}</div>` : ''}${freshTag(r)}${histDelta(seriesFor('score', r)) || (x ? trendChip(x.trend, r.type === 'zta' ? ' pts' : ' pts avg') : '')}</div>${spark(seriesFor('score', r)) ? `<div class="area-spark">${spark(seriesFor('score', r))}</div>` : ''}</div>
       ${x ? `<ul class="exec-side">${x.side.map(([l, v, tn]) => `<li><span>${esc(l)}</span><b class="tx-${esc(tn)}">${esc(v)}</b></li>`).join('')}</ul>` : '<p class="muted">Not a Guard report: open it to view the content.</p>'}

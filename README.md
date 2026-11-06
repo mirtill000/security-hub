@@ -273,7 +273,9 @@ publish: /var/www/html/securityhub
 Viene pubblicato **solo il portale** (e `posture.json` se `posture: true`): mai le cartelle delle esecuzioni, gli export
 JSON/CSV o i log. La cartella deve esistere ed essere scrivibile dall'utente che esegue `run`. Il portale descrive i
 punti deboli dell'organizzazione: va protetto con autenticazione e, se possibile, limitato alla rete di gestione.
-In `deploy/raspberry-pi/` ci sono unità systemd (servizio + timer: 4 esecuzioni al giorno, verso le 6, 10, 14 e 18) e la configurazione nginx d'esempio.
+In `deploy/raspberry-pi/` ci sono unità systemd (servizio + timer: 4 esecuzioni al giorno, verso le 6, 10, 14 e 18),
+il controllo giornaliero delle credenziali (`securityhub-doctor.service` + `.timer`, verso le 05:40, prima della prima
+esecuzione) e la configurazione nginx d'esempio.
 
 ## Monitoraggio continuo
 
@@ -534,6 +536,10 @@ stream). In caso di errore indica la causa probabile (credenziale rifiutata o pr
 Il risultato va in `<output_dir>/health.json` e nella pagina **Status** del portale, che mostra anche per ogni area:
 esito dell'ultima esecuzione, età dei dati, elementi realmente valutati, controlli non valutabili ed errori API.
 Codice di uscita 1 se un controllo fallisce (utilizzabile dal monitoraggio).
+Con `securityhub-doctor.timer` il controllo gira da solo una volta al giorno; se una credenziale fallisce, la card
+dell'area nel portale mostra un badge **Credentials** che porta alla pagina Status. La colonna *Errori di lettura*
+conta i controlli non valutati per un errore API o DNS; *Non verificabili* quelli che per definizione non hanno dati
+(es. DKIM di un dominio non elencato in `dkim.csv`, agent non visti da settimane).
 
 ## Igiene ed esposizione attiva
 

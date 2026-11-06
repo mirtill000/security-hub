@@ -4,6 +4,14 @@ const st = s => ST[s] || ST.missing;
 const scoreCls = n => n >= 75 ? 'hi' : n >= 50 ? 'mid' : 'lo';
 const gradeOf = n => n >= 90 ? 'A' : n >= 75 ? 'B' : n >= 65 ? 'C' : n >= 50 ? 'D' : 'F';
 const tierW = t => D.tiers[t] || 2;
+/* Cell detail: the app's own (DETAIL) or, for a check that could not be evaluated, why. */
+function detailOf(r, c) {
+  const own = DETAIL[c] ? DETAIL[c](r) : '';
+  if (own || r._st(c) !== 'unknown') return own;
+  const ch = (r.checks || {})[c] || {}, d = ch.data || {};
+  if ((ch.issues || []).some(i => /ERROR$/.test(i.code || ''))) return 'read error';
+  return d.not_evaluated || d.reason || '';
+}
 const vis = (r, c) => CHECKS.includes(c) && r._st(c) !== 'skipped';
 const icon = (n, s) => `<svg class="ico" width="${s || 16}" height="${s || 16}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 const tierTag = t => `<span class="tag tier-${esc(t)}">${esc(t)}</span>`;
@@ -96,7 +104,7 @@ const COLS = () => [
   {id: 'score', label: 'Score', sort: 'score', cls: 'r', cell: r => `<div class="scorecell">${scoreHtml(r.overall_score)}<span class="mini"><i class="${scoreCls(r.overall_score)}" style="width:${r.overall_score}%"></i></span></div>`},
   {id: 'delta', label: 'Change', show: !!diff, sort: 'delta', cls: 'r', cell: deltaHtml},
   ...CHECKS.map(c => ({id: 'c.' + c, label: L[c], short: SHORT[c] || L[c], check: c, cls: P.density === 'compact' ? 'c' : '',
-    cell: r => P.density === 'compact' ? sq(r._st(c), L[c]) : pill(r._st(c), DETAIL[c] ? DETAIL[c](r) : '')})),
+    cell: r => P.density === 'compact' ? sq(r._st(c), L[c]) : pill(r._st(c), detailOf(r, c))})),
   {id: 'findings', label: 'Findings', sort: 'findings', cell: r => r._crit || r._warn ? `<span class="counts">${r._crit ? `<span class="cnt crit" title="critical">${r._crit}</span>` : ''}${r._warn ? `<span class="cnt warn" title="warning">${r._warn}</span>` : ''}</span>` : '<span class="faint">None</span>'},
   {id: 'priority', label: 'Priority', sort: 'priority', cls: 'r', cell: r => `<span class="num">${r.priority}</span>`}
 ].filter(c => c.show !== false);

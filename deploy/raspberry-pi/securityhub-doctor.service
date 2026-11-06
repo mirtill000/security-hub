@@ -1,0 +1,32 @@
+# /etc/systemd/system/securityhub-doctor.service - daily check of credentials and APIs (started by securityhub-doctor.timer)
+# One read-only call per module; writes health.json and refreshes the Status page of the portal.
+[Unit]
+Description=Security Hub - credential and API check (securityhub doctor)
+Wants=network-online.target time-sync.target
+After=network-online.target time-sync.target
+
+[Service]
+Type=oneshot
+User=securityhub
+Group=securityhub
+EnvironmentFile=/etc/securityhub/env
+Environment=NO_COLOR=1
+UMask=0027
+WorkingDirectory=/opt/securityhub/config
+ExecStart=/opt/securityhub/venv/bin/securityhub doctor -c /opt/securityhub/config/securityhub.yaml
+# 1 = a credential or API check failed: shown on the Status page and in the journal, not a service crash
+SuccessExitStatus=1
+TimeoutStartSec=10min
+Nice=15
+CPUWeight=20
+IOSchedulingClass=idle
+MemoryHigh=300M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+ReadWritePaths=/opt/securityhub/reports /opt/securityhub/.cache /var/www/html/securityhub

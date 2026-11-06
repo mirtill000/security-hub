@@ -1,0 +1,11 @@
+# /etc/systemd/system/securityhub-doctor.timer - once a day at about 05:40, before the first assessment run (05:55)
+[Unit]
+Description=Security Hub - daily credential and API check around 05:40
+
+[Timer]
+OnCalendar=*-*-* 05:40
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
