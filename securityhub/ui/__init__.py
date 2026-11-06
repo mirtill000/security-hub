@@ -10,8 +10,12 @@ helpers) reaches every report and the portal at once.
   dns|waf|zta|portal.css   page-specific styles
   core.js           helpers shared by all pages
   report-core.js    helpers shared by the three reports
-  asset-report.js   table/filter/drawer application shared by the DNS and WAF reports
+  asset-report.js   table/filter/drawer helpers shared by the asset reports (DNS, WAF, EDR, Proofpoint, IAS, PRA)
+  asset-data.js     payload parsing shared by the EDR, Proofpoint, IAS and PRA reports
+  asset-app.js      the whole application of the EDR, Proofpoint, IAS and PRA reports; each of
+                    edr|proofpoint|ias|pra.js only declares its data, labels and module pages (APP)
   dns|waf|zta|portal.js    page applications
+  edr|proofpoint|ias|pra.js  module configuration of asset-app.js
   report.html, portal.html page skeletons
 """
 
