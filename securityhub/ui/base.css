@@ -99,7 +99,7 @@ button { cursor: pointer; }
 .btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
 .btn:disabled { opacity: .4; cursor: default; }
 .btn .badge-n { background: var(--accent); color: var(--accent-ink); border-radius: 999px; font-size: 11px; padding: 0 6px; font-weight: 600; }
-.seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: var(--r); padding: 2px; background: var(--panel); }
+.seg { display: inline-flex; flex-wrap: wrap; max-width: 100%; border: 1px solid var(--line-2); border-radius: var(--r); padding: 2px; background: var(--panel); }
 .seg button { border: 0; background: none; padding: 4px 10px; border-radius: 6px; color: var(--muted); }
 .seg button[aria-pressed="true"] { background: var(--raised); color: var(--text); box-shadow: 0 0 0 1px var(--line-2); }
 .theme-seg { display: flex; width: 100%; margin-top: 6px; }

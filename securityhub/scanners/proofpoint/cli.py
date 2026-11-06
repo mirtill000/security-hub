@@ -263,7 +263,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     except OSError as e:
         print(f"Error: cannot write output: {e}", file=sys.stderr)
         return EXIT_USAGE
-    prof = Counter(r.profile for r in results)
     sev = Counter(i.severity for r in results for i in r.issues)
     tot = extra.get("totals") or {}
     print(f"\n{'=' * 60}\nSUMMARY\n{'=' * 60}")
@@ -272,7 +271,6 @@ def main(argv: Optional[List[str]] = None) -> int:
           + (f"{', ' if extra.get('not_managed') else ' ('}{len(extra['no_mail'])} without MX" if extra.get("no_mail") else "")
           + (")" if extra.get("not_managed") or extra.get("no_mail") else "") + " - not counted")
     print(f"Well protected (>=75):    {sum(r.overall_score >= 75 for r in results)}")
-    print(f"Not routed via Proofpoint:{prof['unprotected']:>4}   bypass MX: {prof['bypass']}")
     print(f"Direct delivery to verify:{sum(1 for r in results if any(i.code == 'DIRECT_DELIVERY' for i in r.issues)):>4}")
     if extra.get("tap"):
         print(f"TAP ({(extra.get('window') or {}).get('hours')}h):  {tot.get('malicious', 0)} malicious delivered, "

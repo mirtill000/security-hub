@@ -762,8 +762,11 @@ def _execute(cfg, plans, out_dir, stamp, when, run_dir, parallel, max_age, fail_
     reports, history = portal.collect(list_runs(out_dir))
     hub = os.path.join(out_dir, "security_hub.html")
     joined = portal.joins(reports)   # inventory and cross-module risks: once, for the portal and posture.json
-    run_info = {"id": stamp, "modules": [{"module": r.name, "exit_code": r.code, "seconds": round(r.seconds, 1),
-                                          "timed_out": r.timed_out, "error": r.error} for r in ordered]}
+    # last run of EVERY module: a partial run (securityhub run edr) updates its modules and keeps the others
+    prev = (load_health(out_dir).get("run") or {}).get("modules") or []
+    now_mods = {r.name: {"module": r.name, "run": stamp, "exit_code": r.code, "seconds": round(r.seconds, 1),
+                         "timed_out": r.timed_out, "error": r.error} for r in ordered}
+    run_info = {"id": stamp, "modules": [m for m in prev if m.get("module") not in now_mods] + list(now_mods.values())}
     atomic_write(os.path.join(out_dir, "last_run.json"), json.dumps(run_info, indent=2))
     portal.build_hub(reports, hub, str(cfg.get("title") or ""), history, max_age, failed, joined,
                      health=load_health(out_dir))

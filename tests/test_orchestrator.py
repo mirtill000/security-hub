@@ -93,6 +93,14 @@ class RunTest(TempDirTest):
         with open(os.path.join(runs[-1], "zta.json"), encoding="utf-8") as f:
             self.assertTrue(all("change" in t for t in json.load(f)["tests"]))
 
+    def test_last_run_of_every_module_is_kept(self):
+        cfg = self.config()
+        self.run_hub(cfg, T0)
+        self.run_hub(cfg, T0 + timedelta(hours=4), only=["waf"])          # partial run
+        with open(self.path("out", "last_run.json"), encoding="utf-8") as f:
+            mods = {m["module"]: m["run"] for m in json.load(f)["modules"]}
+        self.assertEqual(mods, {"zta": T0.strftime(orch.RUN_FORMAT), "waf": (T0 + timedelta(hours=4)).strftime(orch.RUN_FORMAT)})
+
     def test_runs_in_the_same_second_do_not_overwrite(self):
         cfg = self.config()
         self.run_hub(cfg, T0)

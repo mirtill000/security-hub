@@ -286,7 +286,8 @@ function statusView() {
   const runMods = {};
   (LASTRUN && LASTRUN.modules || []).forEach(m => { runMods[m.module] = m; if (m.module === 'dns') runMods.email = runMods.email || m; });
   const rows = areas.map(r => { const c = r.coverage || {}, d = DOC && DOC.modules ? DOC.modules[r.type] : null, rm = runMods[r.type], f = (M.failed || {})[r.type];
-    const runCell = f ? `<span class="tx-bad">failed: ${esc(f.error)}</span>` : rm ? `<span class="tx-good">ok</span> <span class="faint">${esc(rm.seconds)}s</span>` : '<span class="faint">-</span>';
+    const when = rm && rm.run ? fmtD(rm.run.replace(/^(\d{4}-\d\d-\d\dT\d\d)(\d\d)(\d\d)Z$/, '$1:$2:$3Z')) : '';
+    const runCell = f ? `<span class="tx-bad">failed: ${esc(f.error)}</span>` : rm ? `<span class="${rm.error || ![0, 2].includes(rm.exit_code) ? 'tx-bad">failed' : 'tx-good">ok'}</span> <span class="faint">${esc(rm.seconds)}s${when ? ', ' + esc(when) : ''}</span>` : '<span class="faint">-</span>';
     return `<tr><td class="sticky"><b>${esc(r.label)}</b><div class="dom-sub">${esc(r.file)}</div></td>
       <td>${d ? hPill(d.status) : '<span class="faint">not checked</span>'}</td><td>${runCell}</td>
       <td class="nowrap">${esc(fmtD(r.date))}${r.stale ? ' <span class="pill s-warn">stale</span>' : ''}</td>

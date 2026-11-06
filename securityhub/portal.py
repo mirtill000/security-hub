@@ -181,7 +181,6 @@ def coverage(kind: str, payload: dict) -> dict:
 
 def summarize_assets(kind: str, payload: dict) -> dict:
     rows = payload.get("results") or []
-    tiers = payload.get("tiers") or TIER_W
     measured = [r for r in rows if _scored(kind, r)]
     avg = area_score(kind, payload)
     sev = Counter(i.get("severity") for r in rows for i in r.get("issues") or [])
@@ -189,7 +188,7 @@ def summarize_assets(kind: str, payload: dict) -> dict:
             else "websites")
     kpis = [[len(rows), f"{noun} assessed"], *([[len(rows) - len(measured), "not scored (nothing measurable or read error)", "warn"]]
                                                if len(measured) < len(rows) else []),
-            [sum(r.get("overall_score", 0) >= 75 for r in rows), "well protected (75+)", "pass"],
+            [sum(r.get("overall_score", 0) >= 75 for r in measured), "well protected (75+)", "pass"],
             [sum(r.get("overall_score", 0) < 50 for r in measured), "at critical risk (under 50)", "fail"],
             [sev.get("critical", 0), "critical findings", "fail" if sev.get("critical") else ""]]
     if kind == "waf":
@@ -486,7 +485,7 @@ def exec_waf(payload: dict) -> dict:
         ok = sum(not codes(r) & {"DDOS_THRESHOLD_LOW", "DDOS_THRESHOLD_HIGH", "DDOS_ABOVE_ORIGIN", "DDOS_OFF"} for r in tuned)
         side.append(["DDoS thresholds aligned with traffic", f"{ok} of {len(tuned)}", "good" if ok == len(tuned) else "warn"])
     if unverified:
-        side.append(["Not verified (rules not checked, API errors)", f"{unverified} websites", "warn"])
+        side.append(["Not verified (rules not checked, API errors)", f"{unverified} website{'s' if unverified != 1 else ''}", "warn"])
     measured = [r for r in rows if inventory.waf_measured(r)]
     score = area_score("waf", payload)
     deltas = [r["change"]["score_delta"] for r in measured if r.get("change") and r["change"].get("score_delta") is not None]
@@ -530,8 +529,7 @@ def exec_edr(payload: dict) -> dict:
             ["Agents stale or disabled", str(len(stale)), "warn" if stale else "good"],
             ["Overly broad exclusions", str(broad), "bad" if broad else "good"]]
     if unverified:
-        side.append(["Not verified (policy not readable)", f"{unverified} endpoints", "warn"])
-    measured = [r for r in rows if st(r, "health") not in (None, "unknown")]
+        side.append(["Not verified (policy not readable)", f"{unverified} endpoint{'s' if unverified != 1 else ''}", "warn"])
     score = area_score("edr", payload)
     deltas = [r["change"]["score_delta"] for r in rows if r.get("change") and r["change"].get("score_delta") is not None]
     exposure = bool(active or detect or broad or any(i.get("code") == "COVERAGE_GAP" for i in acc))
@@ -562,7 +560,6 @@ def exec_proofpoint(payload: dict) -> dict:
     """Email protection outcomes: threats that reached users, clicks allowed, gateway enforcement (routing is informational).
     A domain whose routing could not be read is 'not verified'; TAP figures only when TAP was read."""
     rows = payload.get("results") or []
-    st = lambda r, c: ((r.get("checks") or {}).get(c) or {}).get("status")
     codes = lambda r: {i.get("code") for i in r.get("issues") or []}
     direct = [r for r in rows if "DIRECT_DELIVERY" in codes(r)]
     clicked = [r for r in rows if "CLICK_PERMITTED" in codes(r)]
@@ -606,7 +603,6 @@ def exec_proofpoint(payload: dict) -> dict:
     q = (payload.get("tp") or {}).get("quarantines")
     if q:
         side.append(["Condemned messages pulled after being read", str(q.get("pulled_read", 0)), "warn" if q.get("pulled_read") else "good"])
-    measured = [r for r in rows if r.get("score_breakdown", {}).get("max")]
     score = area_score("proofpoint", payload)
     deltas = [r["change"]["score_delta"] for r in rows if r.get("change") and r["change"].get("score_delta") is not None]
     head = None
