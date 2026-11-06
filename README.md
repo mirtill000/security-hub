@@ -323,6 +323,8 @@ inviato a un SIEM o a una dashboard.
 
 ```bash
 export PROOFPOINT_PRINCIPAL=...  PROOFPOINT_SECRET=...      # service principal TAP (oppure --secret-file)
+export PROOFPOINT_TP_KEY=...  PROOFPOINT_TP_SECRET=...       # Threat Protection API key (report: Threat Response, URL rewrite, BEC, email bombing)
+export PROOFPOINT_POD_CLUSTER=...  PROOFPOINT_POD_TOKEN=...   # PoD Log API (autenticazione mittenti, spoofing, TLS, audit console); token dedicato
 securityhub proofpoint --domains domains.csv -o proofpoint.html --json --csv
 securityhub proofpoint --domains domains.csv --no-tap       # solo controlli DNS, senza credenziali
 securityhub proofpoint --save-raw pp.json                   # snapshot senza oggetti, corpi, IP dei click o URL malevoli

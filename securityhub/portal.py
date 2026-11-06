@@ -486,12 +486,35 @@ def exec_proofpoint(payload: dict) -> dict:
         kpis.append(_kpi("pp_delivered", f"Malicious messages delivered ({hours}h)", tot.get("malicious", 0), "",
                          f"{tot.get('blocked_messages', 0)} blocked in the same window", 0, higher_is_better=False,
                          area="proofpoint", hash_="#/policies"))
+        if tot.get("click_block_rate") is not None:
+            kpis.append(_kpi("pp_click_block", "Malicious clicks blocked by URL Defense", tot["click_block_rate"], "%",
+                             f"{tot.get('blocked_clicks', 0)} blocked, {tot.get('malicious_clicks_permitted', 0)} permitted", 100,
+                             area="proofpoint", hash_="#/policies"))
+    pod_msg = (payload.get("pod") or {}).get("message") or {}
+    if pod_msg.get("inbound"):
+        kpis.append(_kpi("pp_auth_enforced", "Inbound mail failing SPF/DMARC that is delivered", pod_msg.get("auth_failed_delivered_pct"), "%",
+                         f"{pod_msg.get('auth_failed_delivered', 0)} of {pod_msg['inbound']} inbound messages (PoD log)", 0,
+                         higher_is_better=False, area="proofpoint", hash_="#/policies"))
+        if pod_msg.get("tls_pct") is not None:
+            kpis.append(_kpi("pp_tls", "Inbound mail received with TLS 1.2+", pod_msg["tls_pct"], "%",
+                             f"{pod_msg.get('no_tls', 0)} messages without", 100, area="proofpoint", hash_="#/policies"))
+    tp_url = ((payload.get("tp") or {}).get("url_rewrite") or {})
+    url_cov = tp_url.get("coverage") if tp_url else pod_msg.get("url_coverage")
+    if url_cov is not None:
+        kpis.append(_kpi("pp_url_rewrite", "URLs rewritten by URL Defense", url_cov, "%",
+                         "Threat Protection report" if tp_url else "PoD message log", 100, area="proofpoint", hash_="#/policies"))
     vap = (payload.get("people") or {}).get("vap") or []
     side = [["Domains bypassing Proofpoint", str(len(bypass)), "bad" if bypass else "good"],
             ["Direct delivery to Microsoft 365 to verify", str(len(direct)), "warn" if direct else "good"]]
     if tap:
         side += [["Users with a malicious click allowed", str(len(users)), "bad" if users else "good"],
                  ["Very Attacked People", str(len(vap)), "warn" if any(p.get("vip") for p in vap) else "good"]]
+    if pod_msg.get("inbound"):
+        side.append(["Spoofed messages from your domains delivered", str(pod_msg.get("spoof_delivered", 0)),
+                     "bad" if pod_msg.get("spoof_delivered") else "good"])
+    q = (payload.get("tp") or {}).get("quarantines")
+    if q:
+        side.append(["Condemned messages pulled after being read", str(q.get("pulled_read", 0)), "warn" if q.get("pulled_read") else "good"])
     measured = [r for r in rows if r.get("score_breakdown", {}).get("max")]
     score = weighted_avg(measured, payload.get("tiers") or TIER_W)
     deltas = [r["change"]["score_delta"] for r in rows if r.get("change") and r["change"].get("score_delta") is not None]

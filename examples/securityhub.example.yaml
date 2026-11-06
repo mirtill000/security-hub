@@ -38,8 +38,10 @@ modules:
       # max_inflight: 32                 # max DNS queries on the wire at once (default 32: router friendly)
       # cache_max_age: 24                # hours: full DKIM search, RDAP, lookalikes... redone once a day (0 = every run)
 
-  # Proofpoint email protection: mail routing from public DNS + TAP (SIEM and People APIs, read-only)
-  # Credentials: export PROOFPOINT_PRINCIPAL=... PROOFPOINT_SECRET=...  (TAP service principal; never in this file)
+  # Proofpoint email protection (read-only), three optional sources besides public DNS - credentials never in this file:
+  #   TAP (SIEM and People APIs):  PROOFPOINT_PRINCIPAL, PROOFPOINT_SECRET  (TAP Dashboard > Settings > Connected Applications)
+  #   Threat Protection reports:   PROOFPOINT_TP_KEY, PROOFPOINT_TP_SECRET  (Cloud Admin UI > Settings > API Key Management)
+  #   PoD Log API (WebSocket):     PROOFPOINT_POD_CLUSTER, PROOFPOINT_POD_TOKEN  (token dedicated to this tool: one session per token)
   # Without credentials only the DNS routing checks run.
   proofpoint:
     enabled: false
@@ -47,6 +49,8 @@ modules:
       domains: domains.csv               # same list as the email module
       csv: true
       # hours: 24                        # TAP window (1-168); keep it equal to the run interval
+      # pod_hours: 4                     # PoD log window read at each run (keep it equal to the run interval)
+      # tp_days: 30                      # period of the Threat Protection reports (read once a day)
       # secret_file: /etc/securityhub/proofpoint.secret  # instead of PROOFPOINT_SECRET
       # gateway_hosts: [pps.contoso.com] # extra MX hosts that are Proofpoint (e.g. on-premises PPS)
       # dns_qps: 20                      # max DNS queries per second

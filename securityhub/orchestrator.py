@@ -66,7 +66,10 @@ RESERVED = {"output", "version", "help"}
 FORBIDDEN = {"api_key": "use the IMPERVA_API_KEY environment variable or api_key_file",
              "api_token": "use the S1_API_TOKEN environment variable or api_token_file",
              "secret": "use the PROOFPOINT_SECRET environment variable or secret_file",
-             "client_secret": "use the IAS_CLIENT_SECRET environment variable or secret_file"}
+             "client_secret": "use the IAS_CLIENT_SECRET environment variable or secret_file",
+             "tp_secret": "use the PROOFPOINT_TP_SECRET environment variable",
+             "pod_token": "use the PROOFPOINT_POD_TOKEN environment variable",
+             "token": "use the environment variable of the module (e.g. PROOFPOINT_POD_TOKEN)"}
 # Option values that are paths: resolved relative to the configuration file.
 PATH_OPTIONS = {"input", "input_file", "metadata", "from_json", "save_raw", "api_key_file", "api_token_file", "inventory",
                 "domains", "secret_file", "cache_file", "client_cert", "client_key",
@@ -114,8 +117,10 @@ modules:
       # max_inflight: 32                 # max DNS queries on the wire at once (default 32: router friendly)
       # cache_max_age: 24                # hours: full DKIM search, RDAP, lookalikes... redone once a day (0 = every run)
 
-  # Proofpoint email protection: mail routing from public DNS + TAP (SIEM and People APIs, read-only)
-  # Credentials: export PROOFPOINT_PRINCIPAL=... PROOFPOINT_SECRET=...  (TAP service principal; never in this file)
+  # Proofpoint email protection (read-only), three optional sources besides public DNS - credentials never in this file:
+  #   TAP (SIEM and People APIs):  PROOFPOINT_PRINCIPAL, PROOFPOINT_SECRET  (TAP Dashboard > Settings > Connected Applications)
+  #   Threat Protection reports:   PROOFPOINT_TP_KEY, PROOFPOINT_TP_SECRET  (Cloud Admin UI > Settings > API Key Management)
+  #   PoD Log API (WebSocket):     PROOFPOINT_POD_CLUSTER, PROOFPOINT_POD_TOKEN  (token dedicated to this tool: one session per token)
   # Without credentials only the DNS routing checks run.
   proofpoint:
     enabled: false
@@ -123,6 +128,8 @@ modules:
       domains: domains.csv               # same list as the email module
       csv: true
       # hours: 24                        # TAP window (1-168); keep it equal to the run interval
+      # pod_hours: 4                     # PoD log window read at each run (keep it equal to the run interval)
+      # tp_days: 30                      # period of the Threat Protection reports (read once a day)
       # secret_file: /etc/securityhub/proofpoint.secret  # instead of PROOFPOINT_SECRET
       # gateway_hosts: [pps.contoso.com] # extra MX hosts that are Proofpoint (e.g. on-premises PPS)
       # dns_qps: 20                      # max DNS queries per second

@@ -222,7 +222,7 @@ class CliPortalTest(TempDirTest):
         r = portal.collect([self.path("pp.html")])[0][0]
         self.assertEqual((r["type"], r["label"], r["exec"]["status"]), ("proofpoint", "Proofpoint", "bad"))
         kpis = {k["key"]: k["value"] for k in r["exec"]["kpis"]}
-        self.assertEqual(kpis, {"pp_routing": 50, "pp_clicks": 1, "pp_delivered": 2})
+        self.assertEqual(kpis, {"pp_routing": 50, "pp_clicks": 1, "pp_delivered": 2, "pp_click_block": 75})
         self.assertEqual(r["exec"]["actions"][0]["code"], "CLICK_PERMITTED")
         portal.compact_report(self.path("pp.html"))
         self.assertEqual(portal.report_page(portal.collect([self.path("pp.report.json")])[0][0]), page)

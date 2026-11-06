@@ -39,7 +39,9 @@ def generate_html_report(results: List[MailDomainResult], account_issues: List[I
         (f"TAP window: {str(win.get('start', ''))[:16]} - {str(win.get('end', ''))[:16]} UTC ({win.get('hours')} hours); "
          f"Very Attacked People and top clickers over {(extra.get('people') or {}).get('window_days')} days."
          if extra.get("tap") else "TAP data not available: only the DNS routing checks were evaluated."),
-        "Read-only: SIEM and People APIs of TAP, public DNS. Subjects, bodies, click IPs and malicious URLs are not stored.",
+        "Read-only: SIEM and People APIs of TAP, Threat Protection reports (GET only), PoD log streams (read for a past "
+        "window and counted as they arrive), public DNS. Subjects, bodies, addresses of the PoD logs, click IPs and "
+        "malicious URLs are not stored.",
         "Compliance and framework references are indicative.",
     ] + [n for n in meta.get("notes", []) if n]
     payload = {
@@ -51,6 +53,7 @@ def generate_html_report(results: List[MailDomainResult], account_issues: List[I
         "diff": meta.get("diff"), "account_issues": [asdict(i) for i in account_issues], "policies": [],
         "people": extra.get("people"), "threats": extra.get("threats") or [], "totals": extra.get("totals"),
         "window": win, "no_mail": extra.get("no_mail") or [], "tap": bool(extra.get("tap")),
+        "tp": extra.get("tp") or {}, "pod": extra.get("pod") or {},
         "results": [asdict(r) for r in results],
     }
     page = (REPORT_TEMPLATE.replace("__TITLE__", html.escape(f"Proofpoint email protection posture - {len(results)} domains"))

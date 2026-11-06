@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from typing import Dict, List, Tuple
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple
 
 from ..edr.analysis import compute_diff  # same result shape: keyed by site_id (here the domain)
 from .checks import (_malicious, check_clicks, check_direct, check_people, check_rewrite, check_routing, check_spf,
                      check_threats)
-from .constants import CHECKS, FINDINGS, SCORE_CAPS, SEVERITY_RANK, TIER_WEIGHTS
+from .constants import CHECKS, FINDINGS, MALICIOUS, SCORE_CAPS, SEVERITY_RANK, TIER_WEIGHTS
 from .models import CheckResult, Issue, MailDomainResult, make_issue
+from .podlog import findings as pod_findings
+from .tpapi import findings as tp_findings
 
 __all__ = ["analyze_snapshot", "compute_diff"]
 
@@ -20,6 +23,34 @@ def _in(addr_domain: str, domain: str) -> bool:
 
 def _dom(addr: str) -> str:
     return addr.rsplit("@", 1)[-1].lower() if "@" in addr else ""
+
+
+LATE_VERDICT_HOURS = 1.0
+
+
+def _ts(v) -> Optional[datetime]:
+    try:
+        return datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _exposure_hours(msgs: List[dict]) -> Optional[dict]:
+    """Time between delivery (messageTime) and the TAP verdict (threatTime) of the malicious messages delivered:
+    how long the threat sat in the mailbox before it was known (SIEM API fields)."""
+    delays = []
+    for m in msgs:
+        t0 = _ts(m.get("time"))
+        times = [_ts(t.get("time")) for t in _malicious(m)]
+        times = [t for t in times if t is not None]
+        if t0 is not None and times:
+            delays.append(max(0.0, (min(times) - t0).total_seconds() / 3600))
+    if not delays:
+        return None
+    delays.sort()
+    mid = len(delays) // 2
+    median = delays[mid] if len(delays) % 2 else (delays[mid - 1] + delays[mid]) / 2
+    return {"messages": len(delays), "median": round(median, 1), "max": round(delays[-1], 1)}
 
 
 def score_domain(r: MailDomainResult, checks: List[str]) -> None:
@@ -184,10 +215,24 @@ def analyze_snapshot(snap: dict, checks: List[str], metadata: Dict[str, dict]
         account.append(make_issue("TOP_CLICKERS", f"{len(repeat)}: " + ", ".join(
             f"{p.get('name') or (p.get('emails') or ['?'])[0]} ({p.get('clicks')})" for p in repeat[:3])
             + (" and others" if len(repeat) > 3 else "")))
+    # permitted malicious clicks per user: a second click means the first one was not acted upon
+    per_user = Counter(k.get("recipient") for k in clicks
+                       if k.get("classification") in MALICIOUS and k.get("status") not in ("cleared", "falsepositive"))
+    repeat_users = sorted((u for u, n in per_user.items() if u and n > 1), key=lambda u: -per_user[u])
+    if repeat_users:
+        account.append(make_issue("CLICK_REPEAT", ", ".join(f"{u} ({per_user[u]})" for u in repeat_users[:5])
+                                  + (" and others" if len(repeat_users) > 5 else "")))
+    exposure = _exposure_hours(msgs)
+    if exposure and exposure["median"] >= LATE_VERDICT_HOURS:
+        account.append(make_issue("THREAT_LATE_VERDICT", f"median {exposure['median']:g} h between delivery and verdict "
+                                                         f"over {exposure['messages']} malicious message(s), longest {exposure['max']:g} h"))
     if extra_domains and listed:
         account.append(make_issue("TAP_DOMAINS_NOT_LISTED", f"{len(extra_domains)}: {', '.join(extra_domains[:5])}"))
     if tap and not msgs and not clicks and not snap.get("blocked"):
         account.append(make_issue("TAP_NO_EVENTS", f"{(snap.get('window') or {}).get('hours', '?')} hours"))
+    tp_issues, tp_data = tp_findings(snap.get("tp"))
+    pod_issues, pod_data = pod_findings(snap.get("pod"))
+    account += tp_issues + pod_issues
     account.sort(key=lambda i: SEVERITY_RANK.get(i.severity, 9))
 
     # threats across the whole organization (what the SOC looks at)
@@ -210,6 +255,12 @@ def analyze_snapshot(snap: dict, checks: List[str], metadata: Dict[str, dict]
     people = {"vap": vap, "top_clickers": clickers, "window_days": snap.get("people_window_days"),
               "threshold": snap.get("vap_threshold")}
     extra = {"people": people, "threats": threats, "no_mail": no_mail, "tap": tap, "window": snap.get("window"),
+             "tp": tp_data, "pod": pod_data,
              "totals": {"delivered": len(msgs), "malicious": sum(1 for m in msgs if _malicious(m)), "clicks_permitted": len(clicks),
-                        "blocked_messages": blocked.get("messages", 0), "blocked_clicks": blocked.get("clicks", 0)}}
+                        "blocked_messages": blocked.get("messages", 0), "blocked_clicks": blocked.get("clicks", 0),
+                        "malicious_clicks_permitted": sum(per_user.values()), "repeat_clickers": len(repeat_users),
+                        # share of the clicks on malicious URLs that URL Defense blocked
+                        "click_block_rate": (round(100 * blocked.get("clicks", 0) / (blocked.get("clicks", 0) + sum(per_user.values())))
+                                             if tap and blocked.get("clicks", 0) + sum(per_user.values()) else None),
+                        "exposure_hours": exposure}}
     return results, account, [], extra

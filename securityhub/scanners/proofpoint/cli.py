@@ -88,6 +88,16 @@ Exit codes: 0 ok, 1 usage/API error, 2 a domain scored below --fail-under, 130 i
     p.add_argument("--qps", type=float, default=1.0, help="Max TAP API requests per second (default: 1)")
     p.add_argument("--timeout", type=float, default=60.0, help="API timeout in seconds (default: 60)")
     p.add_argument("--tap-url", default=TAP_BASE, help=argparse.SUPPRESS)
+    p.add_argument("--no-tp", action="store_true",
+                   help="Skip the Threat Protection API (reports: Threat Response, URL rewrite coverage, BEC, email bombing). "
+                        "Credentials: PROOFPOINT_TP_KEY and PROOFPOINT_TP_SECRET")
+    p.add_argument("--tp-days", type=int, default=30, help="Reporting period of the Threat Protection reports, 1-90 days (default: 30)")
+    p.add_argument("--no-pod", action="store_true",
+                   help="Skip the PoD Log API (sender authentication, spoofing, TLS, URL exclusions, console audit). "
+                        "Credentials: PROOFPOINT_POD_CLUSTER and PROOFPOINT_POD_TOKEN")
+    p.add_argument("--pod-hours", type=int, default=4, help="PoD log window in hours, read at each run (default: 4)")
+    p.add_argument("--pod-max-events", type=int, default=200000,
+                   help="Max events read per PoD stream and run (default: 200000; the figures then are a sample)")
     p.add_argument("--fail-under", type=int, help="Exit with code 2 if any domain scores below this value")
     p.add_argument("-q", "--quiet", action="store_true", help="Only print the summary")
     p.add_argument("--version", action="version", version=f"PPGuard {__version__}")
@@ -149,8 +159,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             print("Warning: TAP credentials not set (PROOFPOINT_PRINCIPAL / PROOFPOINT_SECRET): DNS checks only", file=sys.stderr)
             notes.append("TAP credentials were not configured: delivered threats, clicks and people were not assessed.")
             want_tap = False
-        if not want_tap and not want_dns:
-            print("Error: nothing to assess (give --domains for the DNS checks and/or TAP credentials)", file=sys.stderr)
+        tp_key, tp_secret = os.environ.get("PROOFPOINT_TP_KEY"), os.environ.get("PROOFPOINT_TP_SECRET")
+        pod_cluster, pod_token = os.environ.get("PROOFPOINT_POD_CLUSTER"), os.environ.get("PROOFPOINT_POD_TOKEN")
+        want_tp = not args.no_tp and bool(tp_key and tp_secret)
+        want_pod = not args.no_pod and bool(pod_cluster and pod_token)
+        if not want_tap and not want_dns and not want_tp and not want_pod:
+            print("Error: nothing to assess (give --domains for the DNS checks and/or TAP, Threat Protection or PoD credentials)",
+                  file=sys.stderr)
             return EXIT_USAGE
         snap = {"tool": f"PPGuard {__version__}", "collected": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "domains": domains, "domain_meta": dmeta}
@@ -193,6 +208,22 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"Error: TAP could not be read ({(snap.get('errors') or [{}])[0].get('error')})", file=sys.stderr)
                 return EXIT_USAGE
             sources.append("TAP " + api.base)
+        snap["tp_configured"], snap["pod_configured"] = want_tp, want_pod
+        if want_tp:
+            from ...cache import Store
+            from .tpapi import ThreatProtectionAPI, collect as collect_tp
+            if not 1 <= args.tp_days <= 90:
+                parser.error("--tp-days must be between 1 and 90")
+            log(f"Reading the Proofpoint Threat Protection reports (read-only), last {args.tp_days} days")
+            store = Store("proofpoint", enabled=not args.no_cache)
+            snap["tp"] = collect_tp(ThreatProtectionAPI(tp_key, tp_secret, args.timeout), log, args.tp_days, store=store)
+            store.save()
+            sources.append("Threat Protection reports")
+        if want_pod:
+            from .podlog import collect as collect_pod
+            log(f"Reading the PoD log streams (cluster {pod_cluster}, read-only), last {args.pod_hours} hours")
+            snap["pod"] = collect_pod(pod_cluster, pod_token, domains, log, args.pod_hours, max_events=args.pod_max_events)
+            sources.append("PoD Log API")
         source = " and ".join(sources)
         if args.save_raw:
             with open(args.save_raw, "w", encoding="utf-8") as f:
@@ -205,6 +236,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     results, account, _, extra = analyze_snapshot(snap, checks, snap.get("domain_meta") or {})
     if not tap_read:
         account.append(make_issue("TAP_NOT_CONFIGURED"))
+    if snap.get("tp_configured") is False and "tp" not in snap:
+        account.append(make_issue("TP_NOT_CONFIGURED"))
+    if snap.get("pod_configured") is False and "pod" not in snap:
+        account.append(make_issue("POD_NOT_CONFIGURED"))
     if not results:
         print("Error: no mail domain to assess (no MX found and no TAP event)", file=sys.stderr)
         return EXIT_USAGE
