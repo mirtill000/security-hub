@@ -65,7 +65,7 @@ class TapAPI:
                     detail = e.read().decode("utf-8", "replace").strip()[:200]
                 except Exception:
                     pass
-                hint = {401: " (service principal or secret invalid)", 403: " (principal without access to this API)",
+                hint = {401: " (service principal or secret invalid: use a TAP service credential from the TAP Dashboard, Settings > Connected Applications; PoD Logging API tokens are not accepted)", 403: " (principal without access to this API)",
                         429: " (TAP rate limit reached: retry later or widen the interval between runs)"}.get(e.code, "")
                 raise APIError(f"HTTP {e.code} on {path}{hint}{': ' + detail if detail else ''}", e.code)
             except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError) as e:
