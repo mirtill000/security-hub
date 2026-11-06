@@ -123,6 +123,22 @@ class AnalysisTest(TempDirTest):
         self.assertNotIn("clicks", r["contoso.com"].score_breakdown["components"])
         self.assertFalse(extra["tap"])
 
+    def test_dns_only_report_has_no_tap_controls(self):
+        """TAP not configured: its controls are left out of the report, not shown as read errors."""
+        snap = snapshot()
+        for k in ("messages_delivered", "clicks_permitted", "vap", "top_clickers", "blocked"):
+            snap.pop(k)
+        p = self.path("dns_only.json")
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(snap, f)
+        with silenced():
+            self.assertEqual(cli.main(["pp", "--from-json", p, "-o", self.path("d.html"), "--json"]), EXIT_OK)
+        with open(self.path("d.json"), encoding="utf-8") as f:
+            data = json.load(f)
+        rows = data["results"]
+        self.assertFalse({c for r in rows for c in r["checks"]} & {"threats", "clicks", "rewrite", "people"})
+        self.assertIn("TAP_NOT_CONFIGURED", {i["code"] for i in data["account_issues"]})
+
 
 class FakeResponse(io.BytesIO):
     def __enter__(self):

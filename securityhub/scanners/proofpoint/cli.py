@@ -14,6 +14,7 @@ from typing import List, Optional
 from ...common import EXIT_FAIL_UNDER, EXIT_OK, EXIT_USAGE, Parser
 from .analysis import analyze_snapshot, compute_diff
 from .api import TAP_BASE, APIError, TapAPI, collect
+from .models import make_issue
 from .constants import (CHECK_ALIASES, CHECKS, DNS_CHECKS, PEOPLE_WINDOW_DAYS, PROOFPOINT_HOSTS, TAP_CHECKS, WINDOW_HOURS,
                         __version__)
 from .exports import write_csv, write_json
@@ -197,7 +198,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             with open(args.save_raw, "w", encoding="utf-8") as f:
                 json.dump(snap, f, indent=1, ensure_ascii=False)
             log(f"Snapshot saved: {args.save_raw}")
+    tap_read = "messages_delivered" in snap  # TAP was queried (it may still have failed: then its checks read 'Read error')
+    if not tap_read and any(c in TAP_CHECKS for c in checks):
+        # not configured, or excluded: its controls are not shown as failed reads, they are simply not part of this report
+        checks = [c for c in checks if c not in TAP_CHECKS]
     results, account, _, extra = analyze_snapshot(snap, checks, snap.get("domain_meta") or {})
+    if not tap_read:
+        account.append(make_issue("TAP_NOT_CONFIGURED"))
     if not results:
         print("Error: no mail domain to assess (no MX found and no TAP event)", file=sys.stderr)
         return EXIT_USAGE

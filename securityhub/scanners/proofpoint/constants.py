@@ -48,6 +48,9 @@ FINDINGS: Dict[str, Tuple[str, str, str, str]] = {
                                "Add them to the domain list so their routing is assessed too"),
     "TAP_NO_EVENTS": ("info", "API", "No TAP events in the time window",
                       "Normal for a quiet window; otherwise check that the service principal covers every cluster"),
+    "TAP_NOT_CONFIGURED": ("info", "API", "TAP not configured: delivered threats, clicks, URL Defense and attacked people not assessed",
+                           "Create a TAP service credential (TAP dashboard > Settings > Connected Applications) and set "
+                           "PROOFPOINT_PRINCIPAL and PROOFPOINT_SECRET"),
     "API_ERROR": ("warning", "API", "Part of the TAP data could not be read",
                   "Check the service principal (TAP > Settings > Connected applications) and its access"),
 }
