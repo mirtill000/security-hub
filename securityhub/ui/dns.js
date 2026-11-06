@@ -136,7 +136,7 @@ function chips() {
 /* ================= sidebar & top bar ================= */
 function side() {
   const live = R.filter(r => r.profile !== 'nonexistent');
-  const avg = weighted(live, r => r.overall_score), g = gradeOf(avg);
+  const avg = areaScore(live), g = gradeOf(avg);
   const visible = ROUTES.filter(x => x.show());
   return `<div class="brand"><div class="brand-mark">${icon('shield', 18)}</div><div><b>${esc(TOOL)}</b><small>${esc(TITLE)}</small></div></div>
     <button class="posture" data-route="overview" title="Portfolio grade"><span class="letter g-${g}">${g}</span>
@@ -164,7 +164,7 @@ function topbar() {
 /* ================= overview ================= */
 function overview() {
   const live = R.filter(r => r.profile !== 'nonexistent');
-  const avg = weighted(live, r => r.overall_score), g = gradeOf(avg);
+  const avg = areaScore(live), g = gradeOf(avg);
   let delta = null;
   if (diff) {
     const same = live.filter(r => r.change && !r.change.new && r.change.previous_score !== null && r.change.previous_score !== undefined);
@@ -179,7 +179,7 @@ function overview() {
     <section class="card grade-card" aria-label="Portfolio grade">
       <div class="letter g-${g}">${g}</div><div class="lbl">Portfolio grade</div>
       <div class="avg">${avg.toFixed(0)}<small>/100</small></div>
-      <div class="lbl">${hasMeta ? 'Average weighted by tier' : 'Average score'}${delta !== null ? `, <span class="${delta >= 0 ? 'delta-up' : 'delta-down'}">${delta >= 0 ? '+' : ''}${delta.toFixed(1)} since baseline</span>` : ''}</div>
+      <div class="lbl">${hasMeta ? (D.area ? 'Area score, as in the portal' : 'Average weighted by tier') : (D.area ? 'Area score, as in the portal' : 'Average score')}${delta !== null ? `, <span class="${delta >= 0 ? 'delta-up' : 'delta-down'}">${delta >= 0 ? '+' : ''}${delta.toFixed(1)} since baseline</span>` : ''}${areaNote()}</div>
     </section>
     <section class="card kpi-card">
       ${kpi(n, 'domains analyzed', '', 'data-route="domains"')}

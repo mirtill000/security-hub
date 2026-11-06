@@ -45,3 +45,21 @@ class AreaScoreTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReportMatchesPortalTest(unittest.TestCase):
+    def test_report_carries_the_portal_area_score(self):
+        import json
+        import os
+        import tempfile
+        from securityhub import cli
+        from .helpers import fixture, silenced
+        d = tempfile.mkdtemp()
+        out = os.path.join(d, "edr.html")
+        with silenced():
+            cli.main(["edr", "--from-json", fixture("s1_snapshot.json"), "-o", out])
+        with open(out, encoding="utf-8") as f:
+            payload = json.loads(portal.DATA_RE.search(f.read()).group(1))
+        card = portal.collect([out])[0][0]
+        self.assertEqual((payload["area"]["score"], payload["area"]["grade"]), (card["score"], card["grade"]))
+        self.assertTrue(payload["area"]["cap"])                    # an active threat caps the area: the report says so

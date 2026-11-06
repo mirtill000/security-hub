@@ -18,6 +18,17 @@ function ring(score, size) {
   const rad = 26, c = 2 * Math.PI * rad, off = c * (1 - score / 100);
   return `<svg class="ring ${scoreCls(score)}" width="${size || 64}" height="${size || 64}" viewBox="0 0 64 64" aria-label="Score ${score}"><circle cx="32" cy="32" r="${rad}" class="ring-bg"/><circle cx="32" cy="32" r="${rad}" class="ring-fg" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}" transform="rotate(-90 32 32)"/><text x="32" y="38" text-anchor="middle">${score}</text></svg>`;
 }
+/* The area score as the portal shows it (D.area, computed by the tool: aligned with the status, capped when a
+   critical exposure sets it); reports written before it existed fall back to the tier-weighted average. */
+function areaScore(live) { return D.area && D.area.score !== null && D.area.score !== undefined ? D.area.score : weighted(live, r => r.overall_score); }
+function areaNote() {
+  const a = D.area;
+  if (!a) return '';
+  const x = a.split;
+  return (a.cap ? `<span class="tx-warn" style="display:block;margin-top:6px">${esc(a.cap)}</span>` : '')
+    + (x ? `<span style="display:block;margin-top:6px">Hygiene <b class="score ${scoreCls(x.hygiene)}">${x.hygiene === null || x.hygiene === undefined ? '-' : esc(x.hygiene)}</b>/100
+      &middot; active exposure <b class="${x.exposed || (x.org_exposures || []).length ? 'tx-bad' : 'tx-good'}">${esc(x.exposed)}</b> of ${esc(x.assessed)}${(x.org_exposures || []).length ? ` + ${x.org_exposures.length} org.` : ''}</span>` : '');
+}
 function weighted(rows, fn) {
   const w = rows.reduce((a, r) => a + tierW(r.tier), 0);
   return w ? rows.reduce((a, r) => a + fn(r) * tierW(r.tier), 0) / w : 0;

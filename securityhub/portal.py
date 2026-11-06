@@ -769,6 +769,10 @@ def exec_zta(payload: dict) -> dict:
     return {"status": _status(score, bool(hi)), "kpis": kpis, "side": side, "trend": trend, "actions": actions, "headline": head}
 
 
+EXEC = {"email": exec_email, "dns": exec_dns, "waf": exec_waf, "edr": exec_edr, "proofpoint": exec_proofpoint,
+        "ias": exec_ias, "pra": exec_pra, "zta": exec_zta}
+
+
 def parse_date(text: str) -> Optional[datetime]:
     text = (text or "").strip()
     if not text:
@@ -889,6 +893,23 @@ def _align_score(summary: dict) -> None:
     summary["score_cap"] = f"Capped at {top} (average {round(score)}): {reason}"
 
 
+def area_summary(kind: str, payload: dict) -> Optional[dict]:
+    """The area figures exactly as the portal shows them (score aligned with the status, grade, cap reason,
+    hygiene and exposure): written into each report so the report and the portal never disagree."""
+    if kind not in EXEC or kind == "zta":
+        return None
+    try:
+        summary = {"score": area_score(kind, payload), "exec": EXEC[kind](payload)}
+    except Exception:
+        return None
+    raw = summary["score"]
+    summary["score"] = round(raw) if raw is not None else None
+    _align_score(summary)
+    return {"score": summary["score"], "grade": grade(summary["score"]), "status": summary["exec"].get("status"),
+            "average": round(raw) if raw is not None else None, "cap": summary.get("score_cap"),
+            "split": hygiene_exposure(kind, payload)}
+
+
 def load_report(path: str, idx: int, keep: bool = True) -> dict:
     """Metadata, summary and executive metrics of a report; with keep=False the page and its parsed data are
     dropped right away (history runs only feed the KPI trends: keeping them would cost hundreds of MB)."""
@@ -906,8 +927,7 @@ def load_report(path: str, idx: int, keep: bool = True) -> dict:
     summary["exec"] = None
     if payload is not None and kind in ("email", "dns", "waf", "edr", "proofpoint", "ias", "pra", "zta"):
         try:
-            summary["exec"] = {"email": exec_email, "dns": exec_dns, "waf": exec_waf, "edr": exec_edr, "proofpoint": exec_proofpoint,
-                               "ias": exec_ias, "pra": exec_pra, "zta": exec_zta}[kind](payload)
+            summary["exec"] = EXEC[kind](payload)
         except Exception as e:
             print(f"Warning: executive metrics of {os.path.basename(path)} not available ({type(e).__name__}: {e})", file=sys.stderr)
     _align_score(summary)

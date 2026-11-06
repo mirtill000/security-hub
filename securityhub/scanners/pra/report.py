@@ -52,6 +52,8 @@ def generate_html_report(results: List[ObjectResult], account_issues: List[Issue
         "totals": tot, "site": meta.get("site", ""),
         "results": [asdict(r) for r in results],
     }
+    from ...portal import area_summary   # same area score, grade and cap as the portal
+    payload["area"] = area_summary("pra", payload) if "pra" else None
     page = (REPORT_TEMPLATE.replace("__TITLE__", html.escape(f"BeyondTrust PRA posture - {len(results)} objects"))
             .replace("__CSS__", REPORT_CSS).replace("__JS__", REPORT_JS).replace("__DATA__", _json_for_html(payload)))
     with open(output_file, "w", encoding="utf-8") as f:

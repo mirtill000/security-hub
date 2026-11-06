@@ -50,6 +50,8 @@ def generate_html_report(results: List[SiteResult], account_issues: List[Issue],
         "diff": meta.get("diff"), "account_issues": [asdict(i) for i in account_issues], "policies": policies,
         "results": [asdict(r) for r in results],
     }
+    from ...portal import area_summary   # same area score, grade and cap as the portal
+    payload["area"] = area_summary("waf", payload) if "waf" else None
     page = (REPORT_TEMPLATE.replace("__TITLE__", html.escape(f"Imperva WAF posture - {len(results)} websites"))
             .replace("__CSS__", REPORT_CSS).replace("__JS__", REPORT_JS).replace("__DATA__", _json_for_html(payload)))
     with open(output_file, "w", encoding="utf-8") as f:

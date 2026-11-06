@@ -69,6 +69,8 @@ def generate_html_report(results: List[DomainResult], output_file: str, meta: Op
         "unscanned_report_domains": [] if view == "dns" else meta.get("unscanned_report_domains", []),
         "results": [asdict(r) for r in results],
     }
+    from ...portal import area_summary   # same area score, grade and cap as the portal
+    payload["area"] = area_summary(view, payload) if view else None
     page = (REPORT_TEMPLATE
             .replace("__TITLE__", html.escape(f"{title} - {len(results)} domains"))
             .replace("__CSS__", REPORT_CSS)
