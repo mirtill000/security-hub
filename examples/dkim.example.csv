@@ -1,8 +1,8 @@
-# DKIM selectors per domain: copy as dkim.csv next to the domain list (domains.csv).
-# The selectors listed here are probed first and are expected to exist: a missing one is reported.
-# Several selectors: one row each, or separated by '|' in one cell. The full name s1._domainkey.example.com works too.
-domain;selector
-contoso.example;selector1|selector2
-contoso.example;s1-2024
+# DKIM records per domain: copy as dkim.csv next to the domain list (domains.csv).
+# One DNS zone-file line per selector, as exported from the DNS or the mail platform:
+#   <selector>._domainkey.<domain>.  <TTL>  IN  TXT  "v=DKIM1;k=rsa;p=<public key>"
+# Listed selectors are probed first and must exist; when p= holds the real key, the published key must match it.
+# Delegated selectors (CNAME) and the short form domain;selector are accepted too.
+1m-mm._domainkey.uk.contoso.example.	1	IN	TXT	"v=DKIM1;k=rsa;p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA..."
+selector1._domainkey.contoso.example.	3600	IN	CNAME	selector1-contoso-example._domainkey.contoso.onmicrosoft.com.
 fabrikam.example;mktg
-k1._domainkey.fabrikam.example

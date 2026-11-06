@@ -12,6 +12,7 @@ from typing import List, Optional, Sequence, Tuple
 
 from .constants import DKIM_FIRST_ROUND, DKIM_PROVIDER_SELECTORS, DMARC_RE, SPF_MECHANISMS, SPF_RE, SPF_TERM_RE
 from .domains import org_domain
+from .inputs import dkim_key_id
 from .models import DKIMResult, DKIMSelector, DMARCResult, MXRecord, MXResult, SPFResult, make_issue
 from .util import issues_from_problems, match_provider, parse_tags, rsa_key_bits
 
@@ -327,7 +328,7 @@ class AuthChecks:
                 continue
             algo = tags.get("k", "rsa").lower()
             key = re.sub(r"\s+", "", tags["p"])
-            sel = DKIMSelector(name=selector, algorithm=algo, cname=ans.canonical)
+            sel = DKIMSelector(name=selector, algorithm=algo, cname=ans.canonical, key_id=dkim_key_id(key) if key else None)
             if not key:
                 sel.status = "revoked"
             elif algo == "ed25519":
@@ -460,10 +461,16 @@ class AuthChecks:
         result.valid_selectors = strong + weak
         result.weak_keys = weak
         if declared and dns_errors == 0:
-            found_names = {s.name for s in result.selectors}
+            found = {s.name: s for s in result.selectors}
             for name in declared:
-                if name not in found_names:
+                if name not in found:
                     problems.append(("DKIM_DECLARED_MISSING", name))
+                    continue
+                exp, got = self.domain_dkim_expected.get((domain, name)) or {}, found[name]
+                if exp.get("key_id") and got.key_id and got.key_id != exp["key_id"]:
+                    problems.append(("DKIM_KEY_MISMATCH", f"{name}: published key differs from dkim.csv"))
+                elif exp.get("cname") and got.cname and got.cname.rstrip(".").lower() != exp["cname"]:
+                    problems.append(("DKIM_KEY_MISMATCH", f"{name}: CNAME {got.cname} instead of {exp['cname']}"))
         result.declared = list(declared)
         result.issues = issues_from_problems(problems)
 
@@ -481,7 +488,7 @@ class AuthChecks:
                 result.issues.append(make_issue("DKIM_NOT_FOUND", f"{len(selectors)} selectors probed" + (
                     f"; full search of {len(self.selectors)} selectors on {str(result.full_search)[:10]}"
                     if result.full_search else "")))
-        elif weak or any(i.code == "DKIM_DECLARED_MISSING" for i in result.issues):
+        elif weak or any(i.code in ("DKIM_DECLARED_MISSING", "DKIM_KEY_MISMATCH") for i in result.issues):
             result.status = "partial"
         else:
             result.status = "valid"

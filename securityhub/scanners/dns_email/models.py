@@ -70,6 +70,7 @@ class DKIMSelector:
     hash_algorithms: Optional[str] = None
     cname: Optional[str] = None      # CNAME target when the selector is delegated
     source: str = "probe"            # probe | report (seen in DMARC aggregate reports) | declared (dkim.csv)
+    key_id: Optional[str] = None     # fingerprint of the published p= key (compared with dkim.csv)
 
 
 @dataclass

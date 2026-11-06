@@ -137,28 +137,86 @@ DKIM_FILE = "dkim.csv"
 DKIM_COLUMNS = {"domain": ("domain", "dominio", "domains", "fqdn"),
                 "selector": ("selector", "selectors", "selettore", "selettori", "dkim", "record")}
 SELECTOR_RE = re.compile(r"^[a-z0-9_](?:[a-z0-9_.-]{0,61}[a-z0-9_])?$")
+# DNS zone-file line: <selector>._domainkey.<domain>[.] [TTL] [IN] TXT|CNAME <data>
+ZONE_LINE = re.compile(r"^(?P<name>\S+?\._domainkey\.\S+?)\.?\s+(?:\d+\s+)?(?:IN\s+)?(?P<type>TXT|CNAME)\s+(?P<data>.*)$", re.I)
+KEY_RE = re.compile(r"^[A-Za-z0-9+/]{40,}={0,2}$")
 
 
-def load_dkim_file(path: str) -> Tuple[Dict[str, List[str]], List[str]]:
-    """DKIM selectors of each domain, for selectors that are not the providers' defaults.
+def dkim_key_id(p: str) -> str:
+    """Short fingerprint of a DKIM public key (the p= value): compares keys without copying them into reports."""
+    import hashlib
+    return hashlib.sha256(re.sub(r"\s+", "", p).encode()).hexdigest()[:16]
 
-    One row per domain or per selector; columns separated by ';', ',' or tab; a header row is optional:
 
-        domain;selector
-        contoso.com;s1-2024
-        contoso.com;mktg|crm            several selectors in one cell: '|' or spaces
-        s2._domainkey.fabrikam.com      the full DKIM record name is accepted too
+def _zone_entry(line: str) -> Optional[Tuple[str, str, dict]]:
+    """(domain, selector, expected) from a zone-file line, None when the line is not one."""
+    m = ZONE_LINE.match(line)
+    if not m:
+        return None
+    sel, dom = m.group("name").lower().split("._domainkey.", 1)
+    data = m.group("data").strip()
+    expected: dict = {}
+    if m.group("type").upper() == "TXT":
+        parts = re.findall(r'"((?:[^"\\]|\\.)*)"', data)
+        txt = "".join(parts) if parts else data
+        tags = {}
+        for item in txt.split(";"):
+            if "=" in item:
+                k, v = item.split("=", 1)
+                tags[k.strip().lower()] = re.sub(r"\s+", "", v)
+        p = tags.get("p", "")
+        if KEY_RE.match(p):  # a real key (not a placeholder like p=xxx): the published one must be the same
+            expected["key_id"] = dkim_key_id(p)
+        if tags.get("k"):
+            expected["algorithm"] = tags["k"].lower()
+    else:
+        expected["cname"] = data.split()[0].rstrip(".").lower() if data else ""
+    return dom.rstrip("."), sel, expected
 
-    Lines starting with '#' are comments. Returns ({domain: [selectors]}, invalid entries).
+
+def load_dkim_file(path: str) -> Tuple[Dict[str, List[str]], List[str], Dict[Tuple[str, str], dict]]:
+    """DKIM records each domain publishes, for selectors that are not the providers' defaults.
+
+    Accepted lines (mixed in the same file; '#' starts a comment):
+
+        1m-mm._domainkey.uk.example.com.  1  IN  TXT  "v=DKIM1;k=rsa;p=MIIB..."    DNS zone-file line
+        s1._domainkey.example.com  IN  CNAME  s1.dkim.provider.net.                  delegated selector
+        example.com;s1-2024        or  example.com;mktg|crm                          domain;selector (CSV)
+        s2._domainkey.example.com                                                    record name only
+
+    Returns ({domain: [selectors]}, invalid lines, {(domain, selector): expected}) where expected may hold
+    'key_id' (fingerprint of the p= key in the file), 'algorithm' and 'cname'.
     """
     out: Dict[str, List[str]] = {}
+    expected: Dict[Tuple[str, str], dict] = {}
     invalid: List[str] = []
     col = {"domain": 0, "selector": 1}
     first = True
+
+    def add(dom_raw: str, sels: List[str], line: str, exp: Optional[dict] = None) -> None:
+        domain = normalize_domain(dom_raw)
+        if not domain or not sels:
+            invalid.append(line)
+            return
+        for s in sels:
+            if not SELECTOR_RE.match(s):
+                invalid.append(f"{domain}: {s}")
+                continue
+            if s not in out.setdefault(domain, []):
+                out[domain].append(s)
+            if exp:
+                expected[(domain, s)] = exp
+
     for raw in _read_input(path).splitlines():
-        line = raw.split("#", 1)[0].strip()
-        if not line:
+        line = raw.strip().lstrip("\ufeff")
+        if not line or line.startswith(("#", ";")):
             continue
+        zone = _zone_entry(line)
+        if zone:  # before splitting on ';': the TXT data contains it
+            first = False
+            add(zone[0], [zone[1]], line, zone[2])
+            continue
+        line = line.split("#", 1)[0].strip()
         fields = [f.strip().strip('"').strip() for f in FIELD_SPLIT.split(line)]
         if first:
             first = False
@@ -169,19 +227,10 @@ def load_dkim_file(path: str) -> Tuple[Dict[str, List[str]], List[str]]:
                 continue
         dom_raw = fields[col["domain"]] if col["domain"] < len(fields) else ""
         sel_raw = fields[col["selector"]] if col["selector"] < len(fields) else ""
-        if "._domainkey." in dom_raw.lower() and not sel_raw:   # full record name in one column
-            sel_raw, dom_raw = dom_raw.lower().split("._domainkey.", 1)
-        domain = normalize_domain(dom_raw)
-        sels = [s.lower().split("._domainkey.", 1)[0] for s in re.split(r"[|\s]+", sel_raw) if s]
-        if not domain or not sels:
-            invalid.append(line)
-            continue
-        for s in sels:
-            if not SELECTOR_RE.match(s):
-                invalid.append(f"{domain}: {s}")
-            elif s not in out.setdefault(domain, []):
-                out[domain].append(s)
-    return {d: s for d, s in out.items() if s}, invalid
+        if "._domainkey." in dom_raw.lower() and not sel_raw:   # record name only
+            sel_raw, dom_raw = dom_raw.lower().rstrip(".").split("._domainkey.", 1)
+        add(dom_raw, [s.lower().split("._domainkey.", 1)[0] for s in re.split(r"[|\s]+", sel_raw) if s], line)
+    return {d: s for d, s in out.items() if s}, invalid, expected
 
 
 def find_dkim_file(input_file: Optional[str]) -> Optional[str]:

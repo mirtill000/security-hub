@@ -18,13 +18,25 @@ class LoadTest(TempDirTest):
     def test_formats(self):
         p = self.write("dkim.csv", "﻿Dominio;Selettore\ncontoso.com;s1-2024\nContoso.COM;mktg|crm s1-2024\n"
                                    "s2._domainkey.fabrikam.com\n# comment\nbroken;\nfabrikam.com;ok bad!\n")
-        sel, bad = load_dkim_file(p)
+        sel, bad, _ = load_dkim_file(p)
         self.assertEqual(sel, {"contoso.com": ["s1-2024", "mktg", "crm"], "fabrikam.com": ["s2", "ok"]})
         self.assertEqual(bad, ["broken;", "fabrikam.com: bad!"])
 
     def test_no_header_and_comma(self):
-        sel, bad = load_dkim_file(self.write("x.csv", "contoso.com, s1\ncontoso.com,s2\n"))
+        sel, bad, _ = load_dkim_file(self.write("x.csv", "contoso.com, s1\ncontoso.com,s2\n"))
         self.assertEqual((sel, bad), ({"contoso.com": ["s1", "s2"]}, []))
+
+    def test_zone_file_lines(self):
+        key = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA" + "A" * 40
+        sel, bad, exp = load_dkim_file(self.write("dkim.csv",
+            '1m-mm._domainkey.uk.coachellacontest2025.aperol.com.\t1\tIN\tTXT\t"v=DKIM1;k=rsa;p=xxx"\n'
+            f's2._domainkey.aperol.com. 3600 IN TXT "v=DKIM1; k=rsa; " "p={key[:30]}" "{key[30:]}"\n'   # split TXT strings
+            's3._domainkey.aperol.com IN CNAME s3.dkim.provider.net.\n'
+            '; zone comment\n'))
+        self.assertEqual((sel, bad), ({"uk.coachellacontest2025.aperol.com": ["1m-mm"], "aperol.com": ["s2", "s3"]}, []))
+        self.assertNotIn("key_id", exp[("uk.coachellacontest2025.aperol.com", "1m-mm")])   # p=xxx is a placeholder
+        self.assertEqual(len(exp[("aperol.com", "s2")]["key_id"]), 16)
+        self.assertEqual(exp[("aperol.com", "s3")], {"cname": "s3.dkim.provider.net"})
 
     def test_found_next_to_the_domain_list(self):
         self.write("domains.csv", "contoso.com\n")
@@ -61,6 +73,16 @@ class ScanTest(TempDirTest):
         self.assertIn("DKIM_DECLARED_MISSING", {i["code"] for i in con["issues"]})
         with open(self.path("d.html"), encoding="utf-8") as f:
             self.assertIn("from dkim.csv", f.read())
+
+    def test_key_compared_with_the_zone_line(self):
+        import re
+        txt = load_zones()["selector1._domainkey.contoso.example"]["TXT"][0]
+        good = re.search(r"p=([A-Za-z0-9+/=]+)", txt).group(1)
+        res = self.scan(f'selector1._domainkey.contoso.example. 300 IN TXT "v=DKIM1; k=rsa; p={good}"\n'
+                        f'corp2024._domainkey.fabrikam.example. 300 IN TXT "v=DKIM1; k=rsa; p={"B" * 60}"\n')
+        self.assertEqual(res["contoso.example"]["status"], "valid")                       # same key
+        self.assertIn("DKIM_KEY_MISMATCH", {i["code"] for i in res["fabrikam.example"]["issues"]})
+        self.assertEqual(res["fabrikam.example"]["status"], "partial")
 
     def test_file_can_be_ignored(self):
         res = self.scan("fabrikam.example;corp2024\n", "--dkim-file", "none")

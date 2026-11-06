@@ -8,7 +8,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from .checks_auth import AuthChecks, _SPFEval
 from .checks_dns import DNSHygieneChecks
@@ -55,6 +55,7 @@ class EmailSecurityAnalyzer(AuthChecks, TransportChecks, DNSHygieneChecks, Expos
         self.full_dkim = full_dkim
         self.extra_selectors: List[str] = []  # given by the user: always probed in the first round
         self.domain_selectors: Dict[str, List[str]] = {}  # dkim.csv: the selectors each domain uses, probed first and expected
+        self.domain_dkim_expected: Dict[Tuple[str, str], dict] = {}  # dkim.csv: (domain, selector) -> key fingerprint / CNAME
         self.http_checks = http_checks
         self.allow_private = allow_private
         self.rdap = rdap
