@@ -112,5 +112,5 @@ OPTIONAL_ENGINES = {"pup"}  # off is a choice, reported as info
 MITIGATED = {"mitigated", "blocked", "marked_as_benign", "suspicious_resolved", "resolved"}
 EXECUTABLE_TYPES = {"exe", "dll", "sys", "scr", "com", "ps1", "psm1", "vbs", "js", "jse", "bat", "cmd", "hta", "msi",
                     "jar", "py", "sh", "elf", "so", "dylib", "app", "pkg", "lnk"}
-STALE_DAYS = 14
+STALE_DAYS = 45
 THREAT_SLA_DAYS = 7

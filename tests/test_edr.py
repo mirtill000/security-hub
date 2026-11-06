@@ -4,7 +4,9 @@ import io
 import json
 import os
 import re
+import unittest
 import urllib.error
+from datetime import datetime
 from unittest import mock
 
 from securityhub import cli, orchestrator as orch, portal
@@ -42,7 +44,12 @@ class AnalysisTest(TempDirTest):
         self.assertIn("AGENT_VERY_OLD", codes("ws-milano-02"))
         self.assertLessEqual(r["ws-milano-02"].overall_score, 70)
         self.assertTrue({"THREAT_UNRESOLVED", "THREAT_SLA"} <= codes("ws-milano-01"))  # mitigated, open for 21 days
-        self.assertIn("AGENT_STALE", codes("ws-old-07"))            # 71 days at collection time
+        self.assertIn("AGENT_STALE", codes("ws-old-07"))            # 71 days at collection time (limit 45)
+        # a stale agent reports only that: its other checks show its last known state and are not evaluated
+        self.assertEqual({i.code for i in r["ws-old-07"].issues}, {"AGENT_STALE"})
+        self.assertEqual({c: x.status for c, x in r["ws-old-07"].checks.items() if c != "health"},
+                         {c: "unknown" for c in r["ws-old-07"].checks if c != "health"})
+        self.assertEqual(list(r["ws-old-07"].score_breakdown["components"]), ["health"])
         self.assertEqual(r["mac-design-03"].compliance["ransomware_ready"], "n/a")
         acc = {i.code for i in account}
         self.assertTrue({"EXCLUSION_BROAD", "POLICY_DETECT", "POLICY_ANTI_TAMPER_OFF", "EXCLUSION_NO_DESCRIPTION"} <= acc)
@@ -189,7 +196,7 @@ class CliPortalTest(TempDirTest):
         r = portal.collect([self.path("edr.html")])[0][0]
         self.assertEqual((r["type"], r["label"]), ("edr", "SentinelOne EDR"))
         kpis = {k["key"]: k for k in r["exec"]["kpis"]}
-        self.assertEqual((kpis["edr_protect"]["value"], kpis["edr_coverage"]["value"]), (57, 78))   # 4 of 7 in Protect mode with anti-tamper; 7 of 9
+        self.assertEqual((kpis["edr_protect"]["value"], kpis["edr_coverage"]["value"]), (67, 78))   # 4 of 6 in Protect mode (the stale agent is not evaluated); 7 of 9
         self.assertEqual(r["exec"]["headline"][1], "1 endpoint with a threat not mitigated")
         self.assertEqual(r["exec"]["status"], "bad")
         self.assertEqual(r["exec"]["actions"][0]["code"], "THREAT_ACTIVE")
@@ -209,3 +216,16 @@ class CliPortalTest(TempDirTest):
             json.dump({"modules": {"edr": {"options": {"api_token": "secret"}}}}, f)
         with self.assertRaises(orch.ConfigError):
             orch.run(p, dry_run=True)
+
+
+class StaleWindowTest(unittest.TestCase):
+    def test_default_window_is_45_days(self):
+        from datetime import timedelta
+        snap = snapshot()
+        when = datetime.fromisoformat(snap["collected"])
+        for a in snap["agents"]:
+            if a["computerName"] == "WS-OLD-07":
+                a["lastActiveDate"] = (when - timedelta(days=40)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        r = {x.domain: x for x in edr.analyze_snapshot(snap, list(edr.CHECKS), {})[0]}
+        self.assertNotIn("AGENT_STALE", {i.code for i in r["ws-old-07"].issues})   # 40 days: not stale yet
+        self.assertNotEqual(r["ws-old-07"].profile, "stale")

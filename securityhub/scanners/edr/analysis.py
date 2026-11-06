@@ -164,6 +164,16 @@ def analyze_snapshot(snap: dict, checks: List[str], metadata: Dict[str, dict], i
                 r.checks[c] = builders[c]()
             except Exception as e:  # never lose an endpoint because of unexpected data
                 r.checks[c] = CheckResult(status="unknown", issues=[make_issue("API_ERROR", f"{c}: {type(e).__name__}: {e}")])
+        health = r.checks.get("health")
+        if health is not None and any(i.code == "AGENT_STALE" for i in health.issues):
+            # The agent has not reported for stale_days: what the console shows for it is its last known state, which may
+            # change when it comes back online. Only the stale agent is reported; the other checks are not evaluated.
+            health.issues = [i for i in health.issues if i.code == "AGENT_STALE"]
+            for c in checks:
+                if c != "health":
+                    ch = r.checks[c]
+                    r.checks[c] = CheckResult(status="unknown", max=ch.max, data={**(ch.data or {}), "not_evaluated":
+                                              f"agent not seen for {(health.data or {}).get('last_seen_days')} days"})
         r.issues = sorted((i for c in checks for i in r.checks[c].issues), key=lambda i: SEVERITY_RANK.get(i.severity, 9))
         codes = {i.code for i in r.issues}
         r.profile = ("disabled" if "AGENT_DISABLED" in codes else "stale" if "AGENT_STALE" in codes

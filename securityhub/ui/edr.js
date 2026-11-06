@@ -17,6 +17,8 @@ const DETAIL = {
   threats: r => { const d = cd(r, 'threats'); return d.open ? `${d.active || 0} active, ${d.open} open` : ''; },
   vulnerabilities: r => cd(r, 'vulnerabilities').status || ''
 };
+const staleNote = (r, c) => { const n = (cd(r, c) || {}).not_evaluated;
+  return n ? `<p class="note-box" style="margin-bottom:12px">Not evaluated: ${esc(n)}. The console shows the last state the agent reported; the checks run again when it comes back online.</p>` : ''; };
 const APP = {
   tool: 'EDRGuard', subtitle: 'SentinelOne EDR posture', title: 'SentinelOne EDR posture',
   domSub: r => esc([r.os, r._acc, r.group_name, r.owner, r.bu].filter(Boolean).join(', ')),
@@ -62,7 +64,7 @@ const APP = {
   config: {
     checks: ['health', 'protection', 'policy', 'version'], label: 'Agent and policy',
     render: r => {
-  let h = '';
+  let h = staleNote(r, 'protection');
   if (vis(r, 'health')) { const d = cd(r, 'health');
     h += sec('health', 'Agent', `<div class="kv">${kv('Host name', r.domain)}${kv('Operating system', r.os)}${kv('Machine type', r.machine_type)}${kv('Site', r._acc)}${kv('Group', r.group_name)}
       ${kv('Last seen', d.last_seen ? `${String(d.last_seen).slice(0, 16).replace('T', ' ')} (${d.last_seen_days} days ago)` : '')}${kv('Network status', d.network)}${kv('Operational state', d.operational_state)}
@@ -82,7 +84,7 @@ const APP = {
   exposure: {
     checks: ['threats', 'vulnerabilities', 'scan'], label: 'Threats and vulnerabilities',
     render: r => {
-  let h = '';
+  let h = staleNote(r, 'threats');
   if (vis(r, 'threats')) { const d = cd(r, 'threats'), ts = d.threats || [];
     h += sec('threats', 'Open threats', ts.length ? `<table><thead><tr><th>Threat</th><th>Classification</th><th>Confidence</th><th>Mitigation</th><th>Incident</th><th>Created</th></tr></thead><tbody>
       ${ts.map(t => `<tr><td class="mono">${esc(t.name)}</td><td class="sub">${esc(t.classification)}</td><td>${esc(t.confidence)}</td><td>${['mitigated', 'blocked', 'marked_as_benign'].includes(String(t.mitigation)) ? pill('valid', t.mitigation) : pill('error', t.mitigation || 'not mitigated')}</td>
