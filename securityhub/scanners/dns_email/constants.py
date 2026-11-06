@@ -75,7 +75,7 @@ FINDINGS: Dict[str, Tuple[str, str, str, str]] = {
                               "For domains that send no mail publish exactly 'v=spf1 -all'"),
     # DKIM
     "DKIM_NOT_FOUND": ("warning", "DKIM", "No DKIM key found on the probed selectors",
-                       "Enable DKIM signing with your provider (custom selectors can be passed with --selectors)"),
+                       "Enable DKIM signing with your provider (list the selectors each domain uses in dkim.csv, next to the domain list)"),
     "DKIM_WEAK": ("warning", "DKIM", "DKIM key shorter than 2048 bit",
                   "Rotate to a 2048-bit RSA (or Ed25519 + RSA) key"),
     "DKIM_BROKEN_KEY": ("critical", "DKIM", "DKIM key shorter than 1024 bit (rejected by receivers, RFC 8301)",
@@ -86,6 +86,8 @@ FINDINGS: Dict[str, Tuple[str, str, str, str]] = {
                      "Remove t=y once signing is validated"),
     "DKIM_SHA1": ("warning", "DKIM", "DKIM selector restricted to SHA-1 (h=sha1)",
                   "Allow sha256 (RFC 8301)"),
+    "DKIM_DECLARED_MISSING": ("warning", "DKIM", "DKIM selector listed in dkim.csv is not published in DNS",
+                              "Publish the key given by the mail platform for this selector, or remove the selector from dkim.csv if it is no longer used"),
     "DKIM_REVOKED": ("info", "DKIM", "Revoked DKIM selector (empty p=)",
                      "Fine after a rotation - remove it when no longer needed"),
     "DKIM_DNS_ERROR": ("warning", "DKIM", "DKIM probing failed (DNS errors)",

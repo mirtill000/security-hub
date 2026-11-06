@@ -20,7 +20,7 @@ from .dmarc_reports import load_dmarc_reports
 from .dnsclient import DNSClient, preflight
 from .domains import PublicSuffixList, set_psl
 from .exports import write_csv, write_json
-from .inputs import load_config, load_domains
+from .inputs import find_dkim_file, load_config, load_dkim_file, load_domains
 from .models import DomainResult
 from .rdap import RDAPClient
 from .report import generate_html_report
@@ -154,6 +154,9 @@ Exit codes: 0 ok, 1 usage/input/resolver error, 2 a domain scored below --fail-u
     parser.add_argument("--selectors", default="", help="Extra DKIM selectors, comma-separated")
     parser.add_argument("--selectors-file", help="File with extra DKIM selectors (one per line)")
     parser.add_argument("--only-selectors", action="store_true", help="Probe only the selectors you provide")
+    parser.add_argument("--dkim-file", metavar="CSV",
+                        help="DKIM selectors per domain (domain;selector), probed first and expected to exist. "
+                             "Default: dkim.csv next to the domain list or in the current folder ('none' to ignore it)")
     parser.add_argument("--full-dkim", action="store_true",
                         help="Probe every DKIM selector even after a valid key is found (complete audit, ~5x slower)")
     parser.add_argument("--fast-dkim", action="store_true",
@@ -257,8 +260,25 @@ def main(argv: Optional[List[str]] = None, command: str = "dns") -> int:
         except OSError as e:
             print(f"Error: cannot read selectors file '{args.selectors_file}': {e.strerror or e}", file=sys.stderr)
             return EXIT_USAGE
-    if args.only_selectors and not extra:
-        parser.error("--only-selectors needs --selectors or --selectors-file")
+    dkim_file = None if (args.dkim_file or "").lower() == "none" else (args.dkim_file or find_dkim_file(args.input_file))
+    domain_selectors: Dict[str, List[str]] = {}
+    if dkim_file:
+        try:
+            domain_selectors, bad = load_dkim_file(dkim_file)
+        except (OSError, ValueError) as e:
+            print(f"Error: cannot read DKIM selectors file '{dkim_file}': {getattr(e, 'strerror', None) or e}", file=sys.stderr)
+            return EXIT_USAGE
+        if bad:
+            print(f"{dkim_file}: skipped {len(bad)} invalid entr{'y' if len(bad) == 1 else 'ies'}: "
+                  f"{', '.join(bad[:5])}{' ...' if len(bad) > 5 else ''}", file=sys.stderr)
+        listed = {i.domain for i in inputs}
+        unknown = sorted(set(domain_selectors) - listed)
+        if unknown:
+            print(f"{dkim_file}: {len(unknown)} domain(s) not in the domain list, ignored: "
+                  f"{', '.join(unknown[:5])}{' ...' if len(unknown) > 5 else ''}", file=sys.stderr)
+        domain_selectors = {d: s for d, s in domain_selectors.items() if d in listed}
+    if args.only_selectors and not extra and not domain_selectors:
+        parser.error("--only-selectors needs --selectors, --selectors-file or a dkim.csv file")
     selectors = extra if args.only_selectors else DEFAULT_DKIM_SELECTORS + extra
     nameservers = [n.strip() for n in args.nameservers.split(",") if n.strip()]
     workers = max(1, args.workers)
@@ -300,7 +320,8 @@ def main(argv: Optional[List[str]] = None, command: str = "dns") -> int:
                        for t in args.lookalike_tiers.split(",") if t.strip()} or None
 
     checks_label = "default set" if checks == DEFAULT_CHECKS else ", ".join(CHECK_LABELS[c] for c in checks)
-    dkim_info = f"; {len(selectors)} DKIM selectors" if "dkim" in checks else ""
+    dkim_info = (f"; {len(selectors)} DKIM selectors" + (f", own selectors for {len(domain_selectors)} domain(s) from {os.path.basename(dkim_file)}"
+                                                          if domain_selectors else "")) if "dkim" in checks else ""
     print(f"Analyzing {len(inputs)} domain(s) via live DNS "
           f"({'system resolver' if args.system_resolver else ', '.join(nameservers)}; "
           f"{workers} workers{dkim_info})\nChecks: {checks_label}", file=sys.stderr)
@@ -315,6 +336,7 @@ def main(argv: Optional[List[str]] = None, command: str = "dns") -> int:
                                      lookalike_limit=args.lookalike_limit, lookalike_tiers=lookalike_tiers,
                                      cache=store if store.enabled else None, discovery_max_age=args.cache_max_age)
     analyzer.extra_selectors = extra
+    analyzer.domain_selectors = domain_selectors
     progress = Progress(len(inputs), args.quiet)
     executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="domain")
     try:

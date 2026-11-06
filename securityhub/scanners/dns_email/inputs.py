@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import re
 import sys
 from typing import Any, Dict, List, Optional, Tuple
@@ -126,3 +127,68 @@ def load_config(path: str, profile: Optional[str]) -> Dict[str, Any]:
             v = ",".join(str(x) for x in v)
         out[key] = v
     return out
+
+
+# ---------------------------------------------------------------------------
+# DKIM selectors per domain (dkim.csv)
+# ---------------------------------------------------------------------------
+
+DKIM_FILE = "dkim.csv"
+DKIM_COLUMNS = {"domain": ("domain", "dominio", "domains", "fqdn"),
+                "selector": ("selector", "selectors", "selettore", "selettori", "dkim", "record")}
+SELECTOR_RE = re.compile(r"^[a-z0-9_](?:[a-z0-9_.-]{0,61}[a-z0-9_])?$")
+
+
+def load_dkim_file(path: str) -> Tuple[Dict[str, List[str]], List[str]]:
+    """DKIM selectors of each domain, for selectors that are not the providers' defaults.
+
+    One row per domain or per selector; columns separated by ';', ',' or tab; a header row is optional:
+
+        domain;selector
+        contoso.com;s1-2024
+        contoso.com;mktg|crm            several selectors in one cell: '|' or spaces
+        s2._domainkey.fabrikam.com      the full DKIM record name is accepted too
+
+    Lines starting with '#' are comments. Returns ({domain: [selectors]}, invalid entries).
+    """
+    out: Dict[str, List[str]] = {}
+    invalid: List[str] = []
+    col = {"domain": 0, "selector": 1}
+    first = True
+    for raw in _read_input(path).splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        fields = [f.strip().strip('"').strip() for f in FIELD_SPLIT.split(line)]
+        if first:
+            first = False
+            low = [f.lower() for f in fields]
+            hdr = {k: next((i for i, f in enumerate(low) if f in names), None) for k, names in DKIM_COLUMNS.items()}
+            if hdr["domain"] is not None:
+                col = {"domain": hdr["domain"], "selector": hdr["selector"] if hdr["selector"] is not None else 1}
+                continue
+        dom_raw = fields[col["domain"]] if col["domain"] < len(fields) else ""
+        sel_raw = fields[col["selector"]] if col["selector"] < len(fields) else ""
+        if "._domainkey." in dom_raw.lower() and not sel_raw:   # full record name in one column
+            sel_raw, dom_raw = dom_raw.lower().split("._domainkey.", 1)
+        domain = normalize_domain(dom_raw)
+        sels = [s.lower().split("._domainkey.", 1)[0] for s in re.split(r"[|\s]+", sel_raw) if s]
+        if not domain or not sels:
+            invalid.append(line)
+            continue
+        for s in sels:
+            if not SELECTOR_RE.match(s):
+                invalid.append(f"{domain}: {s}")
+            elif s not in out.setdefault(domain, []):
+                out[domain].append(s)
+    return {d: s for d, s in out.items() if s}, invalid
+
+
+def find_dkim_file(input_file: Optional[str]) -> Optional[str]:
+    """dkim.csv next to the domain list, else in the current folder (None when there is none)."""
+    folders = ([os.path.dirname(os.path.abspath(input_file))] if input_file and input_file != "-" else []) + [os.getcwd()]
+    for folder in dict.fromkeys(folders):
+        p = os.path.join(folder, DKIM_FILE)
+        if os.path.isfile(p):
+            return p
+    return None

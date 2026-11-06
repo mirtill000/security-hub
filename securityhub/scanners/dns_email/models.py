@@ -69,7 +69,7 @@ class DKIMSelector:
     testing: bool = False
     hash_algorithms: Optional[str] = None
     cname: Optional[str] = None      # CNAME target when the selector is delegated
-    source: str = "probe"            # probe | report (seen in DMARC aggregate reports)
+    source: str = "probe"            # probe | report (seen in DMARC aggregate reports) | declared (dkim.csv)
 
 
 @dataclass
@@ -83,6 +83,7 @@ class DKIMResult:
     stopped_early: bool = False  # a valid key was found in the first round (or the domain sends no mail)
     full_search: Optional[str] = None  # when the full selector search was last run, if this run reused it
     dangling: List[dict] = field(default_factory=list)  # {"name", "target"}
+    declared: List[str] = field(default_factory=list)   # selectors listed for the domain in dkim.csv
     issues: List[Issue] = field(default_factory=list)
 
 

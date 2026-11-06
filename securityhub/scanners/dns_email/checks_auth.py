@@ -350,8 +350,9 @@ class AuthChecks:
 
     def _analyze_dkim(self, domain: str, mail_enabled: bool = True, providers: Sequence[str] = ()) -> DKIMResult:
         result = DKIMResult()
+        declared = self.domain_selectors.get(domain, [])  # from dkim.csv
 
-        if self.fast_dkim:
+        if self.fast_dkim and not declared:
             # RFC 8020: NXDOMAIN on _domainkey means no selector can exist below it
             base = self.dns.query(f"_domainkey.{domain}", "TXT")
             if base.status == "nxdomain":
@@ -380,14 +381,16 @@ class AuthChecks:
                     with state_lock:
                         state["errors"] += 1
                 if sel:
-                    if sel.name in from_reports:
+                    if sel.name in declared:
+                        sel.source = "declared"
+                    elif sel.name in from_reports:
                         sel.source = "report"
                     result.selectors.append(sel)
                 if dangling:
                     result.dangling.append(dangling)
 
         from_reports = self.report_selectors.get(domain, [])
-        selectors = list(dict.fromkeys(from_reports + self.selectors))
+        selectors = list(dict.fromkeys(declared + from_reports + self.selectors))
         # Selector search done recently (cache): only the selectors found then (or, when none was found, the
         # common ones) are probed again; the full search is redone when it is older than the cache period,
         # or at once if a known selector disappeared.
@@ -395,7 +398,7 @@ class AuthChecks:
         if self.cache is not None and not self.full_dkim:
             known = self.cache.get("dkim", domain, self.discovery_max_age, str(len(self.selectors)))
             known = known if isinstance(known, list) else None
-        if known == [] and not from_reports and not self.extra_selectors:
+        if known == [] and not from_reports and not self.extra_selectors and not declared:
             # nothing found by the recent full search: if _domainkey still does not exist (RFC 8020: NXDOMAIN
             # means nothing below it), no selector can have appeared - one query instead of a probing round
             base = self.dns.query(f"_domainkey.{domain}", "TXT")
@@ -412,7 +415,7 @@ class AuthChecks:
         else:
             hinted = [x for p in providers for k, v in DKIM_PROVIDER_SELECTORS.items() if k in p.lower() for x in v]
             common = hinted + DKIM_FIRST_ROUND
-            first = list(dict.fromkeys(from_reports + self.extra_selectors + (known if known else common)))
+            first = list(dict.fromkeys(declared + from_reports + self.extra_selectors + (known if known else common)))
             first = [x for x in first if x in selectors]
             rest = [x for x in selectors if x not in first]
         run(first)
@@ -456,6 +459,12 @@ class AuthChecks:
                 problems.append(("DKIM_SHA1", s.name))
         result.valid_selectors = strong + weak
         result.weak_keys = weak
+        if declared and dns_errors == 0:
+            found_names = {s.name for s in result.selectors}
+            for name in declared:
+                if name not in found_names:
+                    problems.append(("DKIM_DECLARED_MISSING", name))
+        result.declared = list(declared)
         result.issues = issues_from_problems(problems)
 
         if result.valid_selectors == 0:
@@ -472,7 +481,7 @@ class AuthChecks:
                 result.issues.append(make_issue("DKIM_NOT_FOUND", f"{len(selectors)} selectors probed" + (
                     f"; full search of {len(self.selectors)} selectors on {str(result.full_search)[:10]}"
                     if result.full_search else "")))
-        elif weak:
+        elif weak or any(i.code == "DKIM_DECLARED_MISSING" for i in result.issues):
             result.status = "partial"
         else:
             result.status = "valid"

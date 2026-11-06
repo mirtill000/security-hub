@@ -24,6 +24,7 @@ modules:
       csv: true
       # dmarc_reports: [./rua]           # DMARC aggregate reports (.xml/.gz/.zip/.eml)
       # full_dkim: true                  # probe every DKIM selector (complete audit, slower; e.g. once a month)
+      # dkim_file: dkim.csv              # DKIM selectors per domain (domain;selector); default: dkim.csv next to the input
 
   dns:
     enabled: true

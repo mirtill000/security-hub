@@ -50,10 +50,11 @@ class EmailSecurityAnalyzer(AuthChecks, TransportChecks, DNSHygieneChecks, Expos
             self._run |= CHECK_DEPENDENCIES.get(c, set())
         self.dns = dns_client or DNSClient(nameservers or ["1.1.1.1", "8.8.8.8", "9.9.9.9"], timeout,
                                            use_system_resolver, qps)
-        self.selectors = list(dict.fromkeys(selectors or self.COMMON_DKIM_SELECTORS))
+        self.selectors = list(dict.fromkeys(self.COMMON_DKIM_SELECTORS if selectors is None else selectors))
         self.fast_dkim = fast_dkim
         self.full_dkim = full_dkim
         self.extra_selectors: List[str] = []  # given by the user: always probed in the first round
+        self.domain_selectors: Dict[str, List[str]] = {}  # dkim.csv: the selectors each domain uses, probed first and expected
         self.http_checks = http_checks
         self.allow_private = allow_private
         self.rdap = rdap

@@ -222,6 +222,11 @@ tema del portale. La stampa e il PDF executive usano sempre la versione chiara.
   `--selectors` e i più diffusi; se c'è una chiave valida la ricerca si ferma, altrimenti si provano tutti i
   selettori noti (quindi "DKIM non trovato" resta affidabile). Sui domini senza posta si cerca solo il primo giro
   (CNAME orfani). Su 900 domini: −56% di query DNS, stessi risultati. `full_dkim: true` per l'audit completo.
+- **Selettori DKIM propri (`dkim.csv`)**: un file `dkim.csv` accanto alla lista domini (o `dkim_file:` nella
+  configurazione, `--dkim-file` da riga di comando) indica i selettori che ogni dominio usa davvero
+  (`dominio;selettore`, più selettori con `|`, oppure il nome completo `s1._domainkey.dominio`). Sono interrogati per
+  primi e attesi: se uno non è pubblicato nel DNS il report lo segnala (`DKIM_DECLARED_MISSING`). Esempio in
+  `examples/dkim.example.csv`; `--dkim-file none` lo ignora.
 - **Query contemporanee limitate** (`max_inflight`, default 32) e limite al secondo opzionale (`qps`): il traffico
   resta gestibile anche per router domestici e tabelle NAT piccole.
 - **Storico leggero**: per i trend il portale usa solo i KPI delle esecuzioni precedenti, i report completi sono caricati

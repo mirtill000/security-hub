@@ -69,7 +69,7 @@ FORBIDDEN = {"api_key": "use the IMPERVA_API_KEY environment variable or api_key
 # Option values that are paths: resolved relative to the configuration file.
 PATH_OPTIONS = {"input", "input_file", "metadata", "from_json", "save_raw", "api_key_file", "api_token_file", "inventory",
                 "domains", "secret_file", "cache_file", "client_cert", "client_key",
-                "selectors_file",
+                "selectors_file", "dkim_file",
                 "psl_file", "dmarc_reports", "baseline", "config"}
 
 EXAMPLE_CONFIG = """\
@@ -99,6 +99,7 @@ modules:
       csv: true
       # dmarc_reports: [./rua]           # DMARC aggregate reports (.xml/.gz/.zip/.eml)
       # full_dkim: true                  # probe every DKIM selector (complete audit, slower; e.g. once a month)
+      # dkim_file: dkim.csv              # DKIM selectors per domain (domain;selector); default: dkim.csv next to the input
 
   dns:
     enabled: true
