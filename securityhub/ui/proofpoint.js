@@ -7,7 +7,7 @@
 window.ASSET_NOUN = ['domain', 'domains'];
 /* @include asset-data.js */
 /* ================= PPGuard: Proofpoint email protection ================= */
-const ACC = D.account_issues || [], POL = [], PEOPLE = D.people || {}, THREATS = D.threats || [], TOT = D.totals || {}, WIN = D.window || {}, NOMAIL = D.no_mail || [], TAP = !!D.tap;
+const ACC = D.account_issues || [], POL = [], PEOPLE = D.people || {}, THREATS = D.threats || [], TOT = D.totals || {}, WIN = D.window || {}, NOMAIL = D.no_mail || [], NOTMAN = D.not_managed || [], TAP = !!D.tap;
 const SHORT = {routing: 'Routing', direct: 'Direct', spf: 'SPF', threats: 'Threats', clicks: 'Clicks', rewrite: 'URL Def.', people: 'People'};
 const DETAIL = {
   routing: r => { const mx = cd(r, 'routing').mx || []; const pp = mx.filter(m => m.proofpoint).length; return mx.length ? `${pp}/${mx.length} MX via Proofpoint` : ''; },
@@ -53,6 +53,7 @@ function podHtml() {
     ${pairs(a.changes, 'Configuration change')}${(a.api_keys || []).length ? `<table style="margin-top:10px"><thead><tr><th>API key</th><th>Action</th><th>By</th><th>When</th></tr></thead><tbody>${a.api_keys.map(k => `<tr><td>${esc(k.name || '')}</td><td>${esc(k.action)}</td><td>${esc(k.by)}</td><td class="sub nowrap">${esc(String(k.time || '').slice(0, 16))}</td></tr>`).join('')}</tbody></table>` : ''}</div></section>`;
   return h;
 }
+const notManHtml = () => NOTMAN.length ? `<section class="card" style="margin-bottom:16px"><header><h2>Listed domains not managed by Proofpoint</h2><p>${NOTMAN.length} domain${NOTMAN.length === 1 ? '' : 's'} of the domain list whose mail Proofpoint does not handle: not counted in the figures</p></header><div class="body"><table><thead><tr><th>Domain</th><th>Why</th><th>Mail handled by</th></tr></thead><tbody>${NOTMAN.slice(0, 500).map(x => `<tr><td class="mono">${esc(x.domain)}</td><td class="sub">${esc(x.reason)}</td><td class="sub">${esc((x.mx || []).join(', '))}</td></tr>`).join('')}</tbody></table></div></section>` : '';
 const APP = {
   tool: 'PPGuard', subtitle: 'Proofpoint email protection', title: 'Proofpoint email protection posture',
   domSub: r => esc([r.gateway ? 'Gateway: ' + r.gateway : '', r._acc, r.source === 'tap' ? 'seen by TAP only' : '', r.owner, r.bu].filter(Boolean).join(', ')),
@@ -75,11 +76,11 @@ const APP = {
   groupKeys: {account: r => [r._acc || '(not identified)'], group: r => [r.gateway || '(unknown)'], os: r => [r.source || '(list)']},
   groupLabels: [['account', 'Mailbox platform'], ['group', 'Gateway'], ['os', 'Source']],
   policies: {
-    label: 'People and threats', show: () => TAP || ACC.length > 0 || NOMAIL.length > 0 || Object.keys(TP).length > 0 || Object.keys(POD).length > 0, count: () => (PEOPLE.vap || []).length + THREATS.length,
+    label: 'People and threats', show: () => TAP || ACC.length > 0 || NOMAIL.length > 0 || NOTMAN.length > 0 || Object.keys(TP).length > 0 || Object.keys(POD).length > 0, count: () => (PEOPLE.vap || []).length + THREATS.length,
     render: () => {
   const who = p => esc(p.name || (p.emails || [''])[0]) + (p.vip ? ' ' + tagc('warn', 'VIP') : '') + `<div class="dom-sub">${esc([(p.emails || [])[0], p.department, p.title].filter(Boolean).join(', '))}</div>`;
   const accHtml = ACC.length ? `<section class="card" style="margin-bottom:16px"><header><h2>Organization findings</h2><p>Across every domain</p></header><div class="body">${issueList(ACC)}</div></section>` : '';
-  if (!TAP) return accHtml + tpHtml() + podHtml() + `<section class="card"><header><h2>TAP not available</h2></header><div class="body"><p class="muted">Delivered threats, clicks and people need the TAP API (PROOFPOINT_PRINCIPAL / PROOFPOINT_SECRET). Only the DNS routing checks were evaluated.</p>${NOMAIL.length ? `<p class="sub" style="margin-top:10px">Domains without MX, not assessed (${NOMAIL.length}): ${NOMAIL.slice(0, 50).map(esc).join(', ')}</p>` : ''}</div></section>`;
+  if (!TAP) return accHtml + tpHtml() + podHtml() + notManHtml() + `<section class="card"><header><h2>TAP not available</h2></header><div class="body"><p class="muted">Delivered threats, clicks and people need the TAP API (PROOFPOINT_PRINCIPAL / PROOFPOINT_SECRET). Only the DNS routing checks were evaluated.</p>${NOMAIL.length ? `<p class="sub" style="margin-top:10px">Domains without MX, not assessed (${NOMAIL.length}): ${NOMAIL.slice(0, 50).map(esc).join(', ')}</p>` : ''}</div></section>`;
   const totals = `<section class="card" style="margin-bottom:16px"><header><h2>TAP in the last ${esc(WIN.hours)} hours</h2><p>${esc(String(WIN.start || '').slice(0, 16).replace('T', ' '))} to ${esc(String(WIN.end || '').slice(0, 16).replace('T', ' '))} UTC</p></header>
     <div class="body"><div class="kv">${kv('Messages blocked', TOT.blocked_messages)}${kv('Threat messages delivered', TOT.delivered)}${kv('of which malicious (active)', TOT.malicious)}${kv('Malicious clicks permitted', TOT.clicks_permitted)}${kv('Clicks blocked', TOT.blocked_clicks)}
       ${kv('Malicious clicks blocked by URL Defense', TOT.click_block_rate === null || TOT.click_block_rate === undefined ? '-' : TOT.click_block_rate + '%', TOT.click_block_rate !== null && TOT.click_block_rate < 90 ? 'score lo' : '')}
@@ -96,7 +97,7 @@ const APP = {
   const topHtml = `<section class="card" style="margin-bottom:16px"><header><h2>Top clickers</h2><p>Users who clicked on threats (permitted or blocked) over ${esc(PEOPLE.window_days)} days</p></header><div class="body">
     ${PEOPLE.top_clickers === null ? '<p class="muted">The People API could not be read.</p>' : top.length ? `<table><thead><tr><th>User</th><th class="r">Clicks</th><th>Threat families</th></tr></thead><tbody>${top.slice(0, 200).map(p => `<tr><td>${who(p)}</td><td class="r num">${esc(p.clicks)}</td><td class="sub">${esc((p.families || []).join(', '))}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">No top clickers in the window.</p>'}</div></section>`;
   const nomail = NOMAIL.length ? `<section class="card"><header><h2>Domains without MX</h2><p>${NOMAIL.length} domain${NOMAIL.length === 1 ? '' : 's'} that receive no mail: not assessed</p></header><div class="body"><div class="tree mono">${NOMAIL.slice(0, 500).map(esc).join('<br>')}</div></div></section>` : '';
-  return accHtml + totals + tpHtml() + podHtml() + thr + vapHtml + topHtml + nomail;
+  return accHtml + totals + tpHtml() + podHtml() + thr + vapHtml + topHtml + notManHtml() + nomail;
     }
   },
   config: {

@@ -44,7 +44,7 @@ FINDINGS: Dict[str, Tuple[str, str, str, str]] = {
     # account level
     "TOP_CLICKERS": ("warning", "People", "Users who repeatedly click on threats",
                      "Assign targeted awareness training and adaptive controls (isolation) to the top clickers"),
-    "TAP_DOMAINS_NOT_LISTED": ("info", "Coverage", "Domains seen by TAP but not in the domain list",
+    "TAP_DOMAINS_NOT_LISTED": ("info", "Coverage", "Domains handled by Proofpoint (TAP or PoD log) but not in the domain list",
                                "Add them to the domain list so their routing is assessed too"),
     "TAP_NO_EVENTS": ("info", "API", "No TAP events in the time window",
                       "Normal for a quiet window; otherwise check that the service principal covers every cluster"),

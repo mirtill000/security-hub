@@ -954,7 +954,7 @@ def joins(reports: List[dict]) -> dict:
 
 # What the joins (inventory, cross-module risks) read from a report: the rest of a large report (thousands of
 # endpoints with their checks) is not kept in memory once its summary and KPIs are computed.
-SLIM_TOP = ("results", "people", "tap", "no_mail", "tenant")
+SLIM_TOP = ("results", "people", "tap", "no_mail", "not_managed", "tenant")
 SLIM_ROW_DROP = ("remediation", "score_breakdown", "change", "frameworks")
 SLIM_ROW_ONLY = {"edr": ("domain", "profile")}
 

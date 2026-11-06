@@ -29,6 +29,9 @@ def generate_html_report(results: List[MailDomainResult], account_issues: List[I
     weighted = [c for c in checks if CHECKS[c]]
     win = extra.get("window") or {}
     notes = [
+        "Only the domains managed by Proofpoint are assessed: an MX record points to Proofpoint, or Proofpoint saw mail "
+        "for them (TAP events or PoD message log). Listed domains whose mail Proofpoint does not handle are shown apart "
+        "and are not counted in the figures and scores.",
         "Score weights: " + ", ".join(f"{CHECK_LABELS[c]} {CHECKS[c]}" for c in weighted)
         + " (normalized over the checks that could be evaluated: a check that could not be measured is not counted as failed).",
         "Inbound mail that does not go through Proofpoint, preferred bypass MX, permitted malicious clicks, threats "
@@ -52,7 +55,8 @@ def generate_html_report(results: List[MailDomainResult], account_issues: List[I
         "compliance": {k: list(v) for k, v in COMPLIANCE_PROFILES.items()}, "tiers": TIER_WEIGHTS,
         "diff": meta.get("diff"), "account_issues": [asdict(i) for i in account_issues], "policies": [],
         "people": extra.get("people"), "threats": extra.get("threats") or [], "totals": extra.get("totals"),
-        "window": win, "no_mail": extra.get("no_mail") or [], "tap": bool(extra.get("tap")),
+        "window": win, "no_mail": extra.get("no_mail") or [], "not_managed": extra.get("not_managed") or [],
+        "tap": bool(extra.get("tap")),
         "tp": extra.get("tp") or {}, "pod": extra.get("pod") or {},
         "results": [asdict(r) for r in results],
     }

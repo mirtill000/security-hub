@@ -189,6 +189,7 @@ class PodLogTest(unittest.TestCase):
         self.assertNotIn("secret subject", json.dumps(pod))                       # nothing of the messages is kept
         m = pod["message"]
         self.assertEqual((m["events"], m["counts"]["inbound"], m["counts"]["other_direction"]), (105, 101, 4))
+        self.assertEqual(m["recipient_domains"], [("contoso.com", 101)])          # domains only, no addresses
 
         issues, data = podlog.findings(pod)
         codes = {i.code for i in issues}

@@ -184,6 +184,7 @@ class MessageStats:
         self.spoofed: Counter = Counter()
         self.no_rewrite: Counter = Counter()
         self.quarantine: Counter = Counter()
+        self.rcpt_domains: Counter = Counter()   # domains the gateway receives mail for (no addresses kept)
 
     def add(self, e: dict) -> None:
         f = e.get("filter") or {}
@@ -191,6 +192,10 @@ class MessageStats:
             self.c["other_direction"] += 1
             return
         self.c["inbound"] += 1
+        rcpts = (e.get("envelope") or {}).get("rcpts") or ((f.get("delivered") or {}).get("rcpts")) or []
+        for d in {_dom(r) for r in (rcpts if isinstance(rcpts, list) else [rcpts])}:
+            if d:
+                self.rcpt_domains[d] += 1
         disp = str(f.get("disposition") or "").lower()
         self.disposition[disp or "?"] += 1
         delivered = disp in ("accept", "continue") and bool((f.get("delivered") or {}).get("rcpts") or not f.get("delivered"))
@@ -238,7 +243,8 @@ class MessageStats:
     def result(self) -> dict:
         return {"counts": dict(self.c), "dispositions": dict(self.disposition), "quarantine": dict(self.quarantine),
                 "auth_fail_senders": self.auth_fail_senders.most_common(10), "no_tls_senders": self.no_tls_senders.most_common(10),
-                "spoofed_domains": self.spoofed.most_common(10), "no_rewrite_reasons": dict(self.no_rewrite)}
+                "spoofed_domains": self.spoofed.most_common(10), "no_rewrite_reasons": dict(self.no_rewrite),
+                "recipient_domains": self.rcpt_domains.most_common(5000)}
 
 
 class AuditStats:

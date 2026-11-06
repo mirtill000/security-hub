@@ -279,6 +279,8 @@ def build(reports: List[dict], now: Optional[datetime] = None) -> dict:
         elif r["type"] == "proofpoint":
             pp_rows += [(x, r["id"]) for x in p.get("results") or [] if x.get("domain")]
             pp_no_mail |= {str(d).lower() for d in p.get("no_mail") or []}
+            # listed but not handled by Proofpoint: known to the assessment, not a coverage gap
+            pp_no_mail |= {str(x.get("domain")).lower() for x in p.get("not_managed") or [] if isinstance(x, dict)}
         elif r["type"] == "zta":
             tenants.append((p.get("tenant") or {}, r))
     for parts in split.values():

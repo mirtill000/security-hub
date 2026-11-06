@@ -148,12 +148,16 @@ def analyze_snapshot(snap: dict, checks: List[str], metadata: Dict[str, dict]
     for m in msgs:
         seen |= {_dom(r) for r in m.get("recipients") or []}
     seen |= {_dom(k.get("recipient") or "") for k in clicks}
+    # domains the PoD gateway received mail for (message log): handled by Proofpoint whatever their MX says
+    pod_msg = ((snap.get("pod") or {}).get("message")) or {}
+    seen |= {str(d).lower() for d, _ in pod_msg.get("recipient_domains") or []}
     seen.discard("")
     extra_domains = sorted(d for d in seen if not any(_in(d, x) for x in listed))
     domains = listed + extra_domains
     scan_date = snap.get("collected", "")
     results: List[MailDomainResult] = []
     no_mail: List[str] = []
+    not_managed: List[dict] = []   # in the domain list, but Proofpoint does not handle their mail: not assessed
     for d in domains:
         dns = dns_data.get(d)
         mine = [m for m in msgs if any(_in(_dom(r), d) for r in m.get("recipients") or [])] if tap else None
@@ -165,6 +169,13 @@ def analyze_snapshot(snap: dict, checks: List[str], metadata: Dict[str, dict]
             no_mail.append(d)  # no MX and no TAP event: the domain does not receive mail
             continue
         covered = any(m.get("proofpoint") for m in mx) if dns else True
+        handled = any(_in(x, d) for x in seen)   # Proofpoint saw mail for it (TAP events or PoD log)
+        if dns and not handled and (not covered or dns.get("mx_status") == "error"):
+            # KPIs are about the domains Proofpoint manages: a listed domain whose MX does not point to Proofpoint
+            # (or could not be read) and for which Proofpoint saw no mail is listed apart, not assessed
+            not_managed.append({"domain": d, "reason": "MX not readable" if dns.get("mx_status") == "error" else "MX not Proofpoint",
+                                "mx": sorted({m.get("platform") or m.get("host") for m in mx if m.get("host")})[:3]})
+            continue
         r = MailDomainResult(site_id=d, domain=d, scan_date=scan_date,
                              source="list+tap" if d in listed and d in seen else "list" if d in listed else "tap")
         meta = metadata.get(d) or {}
@@ -221,7 +232,8 @@ def analyze_snapshot(snap: dict, checks: List[str], metadata: Dict[str, dict]
         account.append(make_issue("THREAT_LATE_VERDICT", f"median {exposure['median']:g} h between delivery and verdict "
                                                          f"over {exposure['messages']} malicious message(s), longest {exposure['max']:g} h"))
     if extra_domains and listed:
-        account.append(make_issue("TAP_DOMAINS_NOT_LISTED", f"{len(extra_domains)}: {', '.join(extra_domains[:5])}"))
+        account.append(make_issue("TAP_DOMAINS_NOT_LISTED", f"{len(extra_domains)}: {', '.join(extra_domains[:5])}"
+                                  + (" and others" if len(extra_domains) > 5 else "")))
     if tap and not msgs and not clicks and not snap.get("blocked"):
         account.append(make_issue("TAP_NO_EVENTS", f"{(snap.get('window') or {}).get('hours', '?')} hours"))
     tp_issues, tp_data = tp_findings(snap.get("tp"))
@@ -248,7 +260,7 @@ def analyze_snapshot(snap: dict, checks: List[str], metadata: Dict[str, dict]
         blocked.update(c)
     people = {"vap": vap, "top_clickers": clickers, "window_days": snap.get("people_window_days"),
               "threshold": snap.get("vap_threshold")}
-    extra = {"people": people, "threats": threats, "no_mail": no_mail, "tap": tap, "window": snap.get("window"),
+    extra = {"people": people, "threats": threats, "no_mail": no_mail, "not_managed": not_managed, "tap": tap, "window": snap.get("window"),
              "tp": tp_data, "pod": pod_data,
              "totals": {"delivered": len(msgs), "malicious": sum(1 for m in msgs if _malicious(m)), "clicks_permitted": len(clicks),
                         "blocked_messages": blocked.get("messages", 0), "blocked_clicks": blocked.get("clicks", 0),

@@ -93,15 +93,15 @@ class AnalysisTest(TempDirTest):
         results, account, _, extra = analyze()
         r = {x.domain: x for x in results}
         self.assertEqual({k: v.profile for k, v in r.items()}, {
-            "contoso.com": "clicked", "fabrikam.com": "delivered", "northwind.com": "unprotected",
+            "contoso.com": "clicked", "fabrikam.com": "delivered",
             "tailspin.com": "protected", "adatum.com": "protected"})
         codes = lambda d: {i.code for i in r[d].issues}
         self.assertTrue({"CLICK_PERMITTED", "THREAT_DELIVERED", "DIRECT_DELIVERY", "URL_NOT_REWRITTEN", "VAP_VIP"} <= codes("contoso.com"))
         self.assertLessEqual(r["contoso.com"].overall_score, 40)
         self.assertTrue({"SAFELIST_DELIVERY", "SPF_NO_PROOFPOINT"} <= codes("fabrikam.com"))
         self.assertFalse({c for d in r for c in codes(d)} & {"MX_NOT_PROOFPOINT", "MX_BYPASS", "MX_BYPASS_PREFERRED"})
-        self.assertEqual(r["northwind.com"].checks["threats"].status, "na")   # TAP cannot see mail it does not filter
-        self.assertNotIn("SPF_NO_PROOFPOINT", codes("northwind.com"))
+        # listed, MX on Microsoft 365, no Proofpoint traffic: not managed by Proofpoint, outside the figures
+        self.assertEqual(extra["not_managed"], [{"domain": "northwind.com", "reason": "MX not Proofpoint", "mx": ["Microsoft 365"]}])
         self.assertEqual(r["tailspin.com"].overall_score, 100)
         self.assertEqual(r["adatum.com"].checks["routing"].status, "unknown")  # seen by TAP only: not resolved
         self.assertEqual(r["adatum.com"].source, "tap")
@@ -112,6 +112,15 @@ class AnalysisTest(TempDirTest):
         self.assertEqual(extra["totals"]["blocked_messages"], 1645)
         self.assertEqual(r["contoso.com"].compliance, {"gateway_enforced": "unknown", "no_exposure": "fail"})
         self.assertEqual(r["tailspin.com"].compliance, {"gateway_enforced": "pass", "no_exposure": "pass"})
+
+    def test_domains_seen_in_the_pod_log_are_managed(self):
+        snap = snapshot()
+        snap["pod"] = {"message": {"counts": {"inbound": 3}, "recipient_domains": [["northwind.com", 2], ["newco.com", 1]]}}
+        results, account, _, extra = analyze(snap)
+        names = {x.domain for x in results}
+        self.assertTrue({"northwind.com", "newco.com"} <= names)        # Proofpoint received mail for them
+        self.assertEqual(extra["not_managed"], [])
+        self.assertIn("newco.com", next(i.message for i in account if i.code == "TAP_DOMAINS_NOT_LISTED"))
 
     def test_dns_only(self):
         snap = snapshot()

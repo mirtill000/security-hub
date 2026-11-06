@@ -267,7 +267,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     sev = Counter(i.severity for r in results for i in r.issues)
     tot = extra.get("totals") or {}
     print(f"\n{'=' * 60}\nSUMMARY\n{'=' * 60}")
-    print(f"Mail domains assessed:    {len(results)}" + (f" ({len(extra['no_mail'])} without MX skipped)" if extra.get("no_mail") else ""))
+    print(f"Domains managed by Proofpoint: {len(results)}"
+          + (f" ({len(extra['not_managed'])} listed but not handled by Proofpoint" if extra.get("not_managed") else "")
+          + (f"{', ' if extra.get('not_managed') else ' ('}{len(extra['no_mail'])} without MX" if extra.get("no_mail") else "")
+          + (")" if extra.get("not_managed") or extra.get("no_mail") else "") + " - not counted")
     print(f"Well protected (>=75):    {sum(r.overall_score >= 75 for r in results)}")
     print(f"Not routed via Proofpoint:{prof['unprotected']:>4}   bypass MX: {prof['bypass']}")
     print(f"Direct delivery to verify:{sum(1 for r in results if any(i.code == 'DIRECT_DELIVERY' for i in r.issues)):>4}")
