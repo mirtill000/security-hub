@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from .common import EXIT_OK, EXIT_USAGE, Parser, atomic_write, grade, json_for_html
-from . import inventory, ui
+from . import correlations, inventory, ui
 
 __version__ = "1.2.0"
 
@@ -884,6 +884,15 @@ def split_history(reports: List[dict]) -> Tuple[List[dict], dict]:
     return current, {"series": list(series.values()), "runs": sorted(runs, key=lambda x: x["date"])}
 
 
+def _links_safe(reports: List[dict]) -> dict:
+    """Cross-module risks; never fail the portal because of one unexpected report shape."""
+    try:
+        return correlations.build(reports)
+    except Exception as e:
+        print(f"Warning: cross-module risks not available ({type(e).__name__}: {e})", file=sys.stderr)
+        return {"links": [], "summary": {"total": 0, "error": str(e)}}
+
+
 def build_hub(reports: List[dict], out: str, title: str, history: Optional[dict] = None,
               max_age: Optional[Dict[str, float]] = None, failed: Optional[Dict[str, dict]] = None) -> int:
     """failed: area -> {"at", "error"} for the areas whose module failed in the latest run (their data is older)."""
@@ -891,7 +900,7 @@ def build_hub(reports: List[dict], out: str, title: str, history: Optional[dict]
             "failed": failed or {},
             "max_age_days": {**MAX_AGE_DAYS, **(max_age or {})},
             "portfolio": portfolio(reports), "history": history or {"series": [], "runs": []},
-            "inventory": inventory.build(reports)}
+            "inventory": inventory.build(reports), "links": _links_safe(reports)}
     index = [{k: v for k, v in r.items() if k not in ("html", "payload", "path")} for r in reports]
     blocks = "\n".join(f'<script type="application/json" id="rep-{r["id"]}">{_json_for_html(r["html"])}</script>' for r in reports)
     page = (HUB_TEMPLATE.replace("__TITLE__", html.escape(title or "GuardHub")).replace("__CSS__", HUB_CSS).replace("__JS__", HUB_JS)
@@ -982,6 +991,7 @@ def posture(reports: List[dict], history: Optional[dict] = None, max_age: Option
         })
     pf = portfolio(reports)
     inv = inventory.build(reports, now)
+    lk = _links_safe(reports)
     assets = [{"asset": a["key"], "status": a["status"], "tier": a["tier"], "score": a["score"], "owners": a["owners"],
                "domains": [d["domain"] for d in a["dns"]], "websites": [w["domain"] for w in a["web"]],
                "next_expiry": a["next_expiry"] and {k: a["next_expiry"][k] for k in ("kind", "name", "date", "days")},
@@ -990,6 +1000,9 @@ def posture(reports: List[dict], history: Optional[dict] = None, max_age: Option
     return {"schema": 2, "tool": f"GuardHub {__version__}", "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "overall": overall_status(areas), "summary": pf["sentence"], "counts": pf["counts"],
             "areas": areas, "actions": pf["actions"], "assets": {"summary": inv["summary"], "items": assets},
+            "links": {"summary": lk["summary"],
+                      "items": [dict({k: x[k] for k in ("severity", "code", "title", "subject", "text")}, areas=sorted({r["area"] for r in x["refs"]}))
+                                for x in lk["links"]]},
             "runs": (history or {}).get("runs", [])}
 
 

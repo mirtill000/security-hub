@@ -144,6 +144,12 @@ function expiryTxt(e) {
   const when = e.days < 0 ? `expired ${plural(-e.days, 'day')} ago` : e.days > 730 ? `in ${Math.floor(e.days / 365)} years` : `in ${plural(e.days, 'day')}`;
   return `<span class="${cls}">${when}</span>`;
 }
+function mailTxt(a) {  // Proofpoint filtering of the asset's mail domains
+  const m = a.mail || [];
+  if (!m.length) return '';
+  const nf = m.filter(x => x.filtered === false).length;
+  return `${SEP}${nf ? `<span class="tx-bad">${nf} not via Proofpoint</span>` : m.every(x => x.filtered) ? '<span class="tx-good">via Proofpoint</span>' : '<span class="faint">Proofpoint not verified</span>'}`;
+}
 const sigCount = a => { const c = a.signals.filter(x => x.severity === 'critical').length, w = a.signals.filter(x => x.severity === 'warning').length;
   return (c ? `<span class="pill s-fail">${c} critical</span> ` : '') + (w ? `<span class="pill s-warn">${w} warning</span>` : '') || '<span class="faint">none</span>'; };
 const A_PAGE = 50, TIER_RANK = {critical: 0, high: 1, medium: 2, low: 3}, ST_RANK = {bad: 0, warn: 1, unknown: 2, good: 3};
@@ -163,7 +169,7 @@ function ath(k, label, sticky) {
 }
 function assetMatches(a) {
   const q = AQ(); if (!q) return true;
-  return [a.key, ...a.owners, ...a.bus, ...a.dns.map(d => d.domain), ...a.web.map(w => w.domain)].some(x => String(x).toLowerCase().includes(q));
+  return [a.key, ...a.owners, ...a.bus, ...a.dns.map(d => d.domain), ...a.web.map(w => w.domain), ...(a.mail || []).map(m => m.domain)].some(x => String(x).toLowerCase().includes(q));
 }
 function assetList() {
   const f = (A_FILTERS.find(x => x[0] === S.af) || A_FILTERS[0]), all = sortedAssets(AS.filter(f[2]).filter(assetMatches)), sm = INV.summary || {};
@@ -176,7 +182,7 @@ function assetList() {
   const body = rows.map(a => { const root = a.dns.find(d => d.domain === a.key) || a.dns[0], byp = a.web.filter(w => w.profile === 'bypass').length, unp = a.web.filter(w => w.protected === false).length;
     return `<tr data-asset="${esc(a.key)}"><td class="sticky"><button class="dom" data-asset="${esc(a.key)}">${esc(a.key)}</button><div class="dom-sub">${esc([...a.owners, ...a.bus].join(', ') || ' ')}</div></td>
       <td>${tierTag(a.tier)}</td><td>${stPill(a.status)}</td>
-      <td>${root ? `${scoreTxt(a.dns_score)}${SEP}<span class="faint">DMARC</span> ${dmarcTxt(root)}${a.dns.length > 1 ? `${SEP}<span class="faint">${plural(a.dns.length, 'domain')}</span>` : ''}` : '<span class="faint">not assessed</span>'}</td>
+      <td>${root ? `${scoreTxt(a.dns_score)}${SEP}<span class="faint">DMARC</span> ${dmarcTxt(root)}${a.dns.length > 1 ? `${SEP}<span class="faint">${plural(a.dns.length, 'domain')}</span>` : ''}` : '<span class="faint">not assessed</span>'}${mailTxt(a)}</td>
       <td>${a.web.length ? `${scoreTxt(a.web_score)}${SEP}<span class="faint">${plural(a.web.length, 'site')}</span>${byp ? `${SEP}<span class="tx-bad">${byp} in bypass</span>` : unp ? `${SEP}<span class="tx-warn">${unp} not blocking</span>` : ''}` : '<span class="faint">none</span>'}</td>
       <td class="nowrap">${expiryTxt(a.next_expiry)}</td>
       <td><div class="asset-sig">${sigCount(a)}${a.signals[0] ? `<span class="asset-sig-t">${esc(a.signals[0].text)}</span>` : ''}</div></td></tr>`; }).join('');
@@ -204,6 +210,10 @@ function assetDetail(a) {
       <td>${protPill(w.protected)}</td>
       <td class="nowrap">${w.cert_expires ? esc(w.cert_expires) + ' ' : ''}${expiryTxt({kind: 'certificate', days: w.cert_days !== null && w.cert_days !== undefined ? w.cert_days : w.served_cert_days})}</td>
       <td class="sub">${esc(w.main)}</td><td>${openBtn(w.report, w.hash)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No website of this domain is protected by the WAF assessed.</p>';
+  const mail = (a.mail || []).length ? `<div class="grid-wrap asset-sub"><table class="grid"><thead><tr><th>Mail domain</th><th>Score</th><th>Filtered by Proofpoint</th><th>MX</th><th>Threats delivered</th><th>Main finding</th><th></th></tr></thead><tbody>
+    ${a.mail.map(m => `<tr data-go="${esc(m.report)}" data-h="${esc(m.hash)}"><td><b>${esc(m.domain)}</b><div class="dom-sub">${esc(m.platform || '')}</div></td><td>${scoreTxt(m.score)}</td>
+      <td>${protPill(m.filtered)}</td><td class="sub mono">${esc(m.mx.join(', '))}</td><td class="r num">${m.delivered ? `<b class="tx-bad">${esc(m.delivered)}</b>` : '0'}${m.self_spoof ? ` <span class="tx-bad">(${esc(m.self_spoof)} from the domain itself)</span>` : ''}</td>
+      <td class="sub">${esc(m.main)}</td><td>${openBtn(m.report, m.hash)}</td></tr>`).join('')}</tbody></table></div>` : '';
   const exp = a.expiries.length ? `<table class="keys asset-exp">${a.expiries.map(e => `<tr><td>${esc(e.name)}</td><td class="faint">${esc(e.kind)}, ${esc(e.source)}</td><td class="mono">${esc(e.date || '')}</td><td class="r">${expiryTxt(e)}</td></tr>`).join('')}</table>`
     : '<p class="muted">No certificate or registration date known.</p>';
   const t = a.tenant;
@@ -216,6 +226,7 @@ function assetDetail(a) {
       <div class="kv">${kv.map(([k, v]) => `<div><span>${esc(k)}</span><b>${v}</b></div>`).join('')}</div></div></section>
     ${sig}
     <section class="card asset-card"><header><span class="hub-type">${icon('dns', 14)}E-mail and DNS security</span></header><div class="body">${dns}</div></section>
+    ${mail ? `<section class="card asset-card"><header><span class="hub-type">${icon('proofpoint', 14)}Mail filtering (Proofpoint)</span></header><div class="body">${mail}</div></section>` : ''}
     <section class="card asset-card"><header><span class="hub-type">${icon('waf', 14)}Websites protected by the WAF</span></header><div class="body">${web}</div></section>
     <section class="card asset-card"><header><span class="hub-type">${icon('info', 14)}Certificates and registrations</span></header><div class="body">${exp}</div></section>`;
 }
@@ -227,7 +238,10 @@ const SIG_LABEL = {
   DNS_AXFR_OPEN: 'Allow zone transfers only to the secondary name servers (ACL or TSIG)',
   WEB_NO_CAA: 'Publish CAA records naming only the certificate authorities you use',
   DATA_INCOMPLETE: 'Re-run the assessment with every check, or fix the DNS / API errors shown in the report',
-  DNS_NOT_MONITORED: 'Coverage gap: add the domain to the DNS / e-mail assessment'};
+  DNS_NOT_MONITORED: 'Coverage gap: add the domain to the DNS / e-mail assessment',
+  MAIL_NOT_FILTERED: 'Point every MX record to Proofpoint and restrict direct delivery to the mailbox service',
+  SELF_SPOOF_DELIVERED: 'Cross-area: attackers already use the domain as sender. Move DMARC to p=reject and review the Proofpoint spoofing rules',
+  MAIL_NOT_IN_PROOFPOINT: 'Coverage gap: add the domain to the Proofpoint assessment, or route its mail through Proofpoint'};
 function assetsView() { return S.asset ? assetDetail(AS.find(a => a.key === S.asset)) : assetList(); }
 function assetsCard() {
   const top = AS.filter(a => a.status === 'bad' || a.status === 'warn').slice(0, 5);
@@ -237,6 +251,23 @@ function assetsCard() {
       <span class="exec-act-main"><b>${esc(a.key)}</b><span class="exec-act-rec">${esc((a.signals[0] || {}).text || 'Lowest score ' + a.score)}</span></span>
       <span class="exec-act-meta">${tierTag(a.tier)}<span class="exec-act-n">${plural(a.signals.length, 'signal')}</span></span></button></li>`).join('')}</ul>
       <button class="btn" data-assets style="margin-top:10px">All ${plural(AS.length, 'asset')}</button></div></section>`;
+}
+
+/* ---------- cross-module risks: people and endpoints joined across Proofpoint, SAP IAS, PRA and EDR ---------- */
+const LK = M.links || {links: [], summary: {}}, LINKS = LK.links || [];
+const AREA_LAB = {email: 'Email security', dns: 'DNS security', waf: 'Imperva Cloud WAF', edr: 'SentinelOne EDR', proofpoint: 'Proofpoint', ias: 'SAP Cloud Identity', pra: 'BeyondTrust PRA', zta: 'Microsoft Zero Trust'};
+function linksCard() {
+  const sm = LK.summary || {};
+  if (!LINKS.length) return (sm.areas || []).length > 1 ? `<section class="card"><div class="body muted">No cross-module risk: ${esc(sm.people_joined || 0)} people and
+    ${esc(sm.pra_targets_matched || 0)} privileged access targets were joined across ${esc((sm.areas || []).map(a => AREA_LAB[a] || a).join(', '))}.</div></section>` : '';
+  const shown = S.lall ? LINKS : LINKS.slice(0, 6);
+  return `<section class="card exec-actions links-card"><header><h2>Cross-module risks</h2><p>The same person or endpoint seen by different tools: risks that no single report shows</p></header>
+    <div class="body"><ul>${shown.map(x => `<li><div class="exec-act link-row"><span class="sev-bar sev-${esc(x.severity)}"></span>
+      <span class="exec-act-main"><b>${esc(x.title)}</b><span class="exec-act-rec">${esc(x.text)}</span><span class="link-fix">${esc(x.fix)}</span>
+        <span class="link-refs">${x.refs.map(r => `<button class="btn small" data-go="${esc(r.report)}" data-h="${esc(r.hash)}">${icon(r.area, 14)}${esc(r.label)}</button>`).join('')}</span></span>
+      <span class="exec-act-meta"><span class="pill ${x.severity === 'critical' ? 's-fail' : 's-warn'}">${esc(x.severity)}</span></span></div></li>`).join('')}</ul>
+      ${LINKS.length > 6 ? `<button class="btn" data-lall style="margin-top:10px">${S.lall ? 'Show fewer' : `All ${plural(LINKS.length, 'risk')}`}</button>` : ''}
+      ${sm.pra_targets_by_address ? `<p class="faint exec-note">${plural(sm.pra_targets_by_address, 'PRA target')} defined by IP address could not be compared with the EDR host names.</p>` : ''}</div></section>`;
 }
 
 /* ---------- state & routing: #/overview, #/trends, #/assets[?a=<asset>|?f=<filter>] or #/r/<id>?h=<report hash> ---------- */
@@ -368,7 +399,7 @@ function overview() {
   return `<div class="print-head"><h1>${esc(M.title || 'GuardHub')}</h1><p class="muted">Generated ${esc(M.generated)}</p></div>
     ${staleBanner()}${areaHtml}
     ${kpiHtml ? `<div class="section-title exec-sec"><h2>Key indicators</h2><p>Outcomes measured across all reports. Select one to see the affected items.</p></div>${kpiHtml}` : ''}
-    ${actHtml}${assetsCard()}${detail}
+    ${actHtml}${linksCard()}${assetsCard()}${detail}
     <p class="faint exec-note">Each tool scores on its own scale: grades are not comparable across areas. Targets on the bars mark the expected end state.</p>`;
 }
 function render() {
@@ -459,6 +490,7 @@ document.addEventListener('click', e => {
   if (ds.home !== undefined) { home(); return; }
   if (ds.trends !== undefined) { page('trends'); return; }
   if (ds.assets !== undefined) { openAsset(null); return; }
+  if (ds.lall !== undefined) { S.lall = !S.lall; render(); return; }
   if (ds.asset) { openAsset(ds.asset); window.scrollTo(0, 0); return; }
   if (ds.af) { S.af = ds.af; S.apage = 1; history.replaceState(null, '', toHash()); render(); return; }
   if (ds.asort) { const k = ds.asort; S.asort = {k, d: S.asort && S.asort.k === k ? -S.asort.d : 1}; S.apage = 1; $('#view').innerHTML = assetsView(); return; }

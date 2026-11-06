@@ -119,3 +119,9 @@ tr[data-go] { cursor: pointer; }
 @media print { #frames { display: none !important; } .asset-grid, .asset-sub { overflow: visible; } }
 
 /* @include print-head.css */
+/* cross-module risks: the row holds buttons to each report, so it is not itself a button */
+.links-card .link-row { cursor: default; } .links-card .link-row:hover { background: none; }
+.links-card .link-row .exec-act-rec { -webkit-line-clamp: unset; display: block; }
+.link-fix { display: block; font-size: 12.5px; color: var(--text); margin-top: 4px; }
+.link-refs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.link-refs .btn { font-weight: 500; }

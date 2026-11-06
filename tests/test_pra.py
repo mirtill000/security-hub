@@ -94,7 +94,7 @@ class ReadOnlyClientTest(TempDirTest):
                 return FakeResponse(XML)
             if path == "/api/config/v1/user":
                 page = int(urllib.parse.parse_qs(urllib.parse.urlsplit(req.full_url).query)["current_page"][0])
-                return FakeResponse(json.dumps([{"id": i, "email_address": "x@y", "enabled": True}
+                return FakeResponse(json.dumps([{"id": i, "email_address": "x@y", "phone_number": "+39 000", "enabled": True}
                                                 for i in range(100 if page == 1 else 3)]).encode())
             if path == "/api/config/v1/vendor":
                 return FakeResponse(b'[{"id": 7, "name": "V"}]')
@@ -105,7 +105,8 @@ class ReadOnlyClientTest(TempDirTest):
         with mock.patch.object(praapi.urllib.request, "urlopen", fake):
             snap = praapi.collect(api, lambda m: None, now=datetime(2026, 11, 1, tzinfo=timezone.utc))
         self.assertEqual(len(snap["users"]), 103)                                   # pagination
-        self.assertNotIn("email_address", snap["users"][0])                          # minimized
+        self.assertNotIn("phone_number", snap["users"][0])                           # minimized
+        self.assertEqual(snap["users"][0]["email_address"], "x@y")                    # kept: joins the person across modules
         text = json.dumps(snap)
         self.assertNotIn("198.51.100.9", text)                                       # no user IP addresses
         self.assertEqual(snap["sessions"][0]["file_transfers"], 2)

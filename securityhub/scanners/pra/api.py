@@ -152,10 +152,10 @@ class PRAClient:
 
 
 KEEP = {
-    "user": ("id", "username", "public_display_name", "security_provider_id", "two_factor_required", "two_factor_type",
+    "user": ("id", "username", "public_display_name", "email_address", "security_provider_id", "two_factor_required", "two_factor_type",
              "two_factor_enabled", "fido2_credential_count", "enabled", "last_authentication", "failed_logins", "created_at",
              "perm_admin", "perm_vault", "perm_set_passwords", "perm_endpoint_automation", "perm_access_allowed"),
-    "vendor_user": ("id", "username", "public_display_name", "account_expiration", "enabled", "last_authenticated_date",
+    "vendor_user": ("id", "username", "public_display_name", "email_address", "account_expiration", "enabled", "last_authenticated_date",
                     "vendor_administrator", "is_approved", "is_expired", "two_factor_enabled", "fido2_credential_count"),
     "asset": ("id", "name", "hostname", "jump_group_type", "jump_group_id", "jump_policy_id", "session_policy_id",
               "jumpoint_id", "tag", "protocol", "ignore_untrusted", "tunnel_type"),

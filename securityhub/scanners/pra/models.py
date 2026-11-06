@@ -40,6 +40,8 @@ class ObjectResult:
     account_name: str = ""             # kind label
     kind: str = ""
     detail: str = ""             # one-line description (asset type and host, user display name, vendor group...)
+    email: str = ""              # users and vendor users: e-mail address (joins the person across modules)
+    host: str = ""               # assets: host name or address (joins the endpoint with the EDR report)
     groups: List[str] = field(default_factory=list)
     profile: str = "ok"
     tier: str = "medium"

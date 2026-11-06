@@ -1,4 +1,4 @@
-"""Asset inventory: one view per organization domain across e-mail/DNS, WAF, certificates and tenant.
+"""Asset inventory: one view per organization domain across e-mail/DNS, Proofpoint, WAF, certificates and tenant.
 
 The reports are produced by independent tools; this module joins them on the domain name:
 
@@ -6,7 +6,11 @@ The reports are produced by independent tools; this module joins them on the dom
     grouped under the shortest listed parent, e.g. mail.contoso.com under contoso.com);
   - every website protected by the WAF joins the longest listed domain it belongs to, or
     an asset of its own (registrable domain) when the DNS module does not cover it;
+  - every mail domain of the Proofpoint report joins its domain in the same way (mail routing,
+    threats delivered with the domain itself as sender);
   - the Zero Trust tenant joins the asset of its primary domain.
+
+People and endpoints (Proofpoint, SAP IAS, PRA, EDR) are joined in `correlations`.
 
 For each asset the module derives cross-area *signals*: problems that only appear when the
 areas are seen together (a website not protected by the WAF on a domain that can be spoofed
@@ -137,6 +141,26 @@ def _waf_item(r: dict, report: str) -> dict:
             "main": _first(r.get("issues")), "report": report, "hash": "#/domains?d=" + str(r.get("domain"))}
 
 
+def _mail_item(r: dict, report: str) -> dict:
+    """A domain as seen by Proofpoint: is its mail filtered, and which delivered threats used the domain as sender."""
+    ck = r.get("checks") or {}
+    msgs = ((ck.get("threats") or {}).get("data") or {}).get("messages") or []
+    dom = str(r.get("domain") or "").lower()
+    self_spoof = [m for m in msgs if _under(str(m.get("from_domain") or "").lower(), dom)]
+    routing = (ck.get("routing") or {}).get("data") or {}
+    measured = r.get("profile") != "error" and routing.get("mx_status") != "error"
+    return {"domain": dom, "profile": r.get("profile"), "measured": measured,
+            "filtered": None if not measured else r.get("profile") not in ("unprotected", "bypass"),
+            "gateway": r.get("gateway") or "", "platform": r.get("account_name") or "",
+            "mx": [m.get("host") for m in routing.get("mx") or []],
+            "score": r.get("overall_score") if measured else None, "grade": grade(r.get("overall_score") if measured else None),
+            "tier": r.get("tier", "medium"), "owner": r.get("owner", ""), "bu": r.get("bu", ""),
+            "delivered": ((ck.get("threats") or {}).get("data") or {}).get("malicious") or 0,
+            "self_spoof": len(self_spoof), "self_spoof_when": str((self_spoof[-1] if self_spoof else {}).get("time") or "")[:10],
+            "critical": sum(i.get("severity") == "critical" for i in r.get("issues") or []),
+            "main": _first(r.get("issues")), "report": report, "hash": "#/domains?d=" + dom}
+
+
 DNS_FIELDS = ("dnssec", "caa", "takeover", "axfr", "consistency", "lookalikes")
 
 
@@ -185,6 +209,26 @@ def _signals(asset: dict, now: datetime) -> List[dict]:
         if d in spoofable and not (unprotected and d is spoofable[0]):
             sev = "critical" if d["tier"] in ("critical", "high") and d["profile"] == "mail" else "warning"
             out.append(_signal(sev, "MAIL_SPOOFABLE", f"{d['domain']} can be impersonated by e-mail (DMARC {d['dmarc']})", d["report"], d["hash"]))
+    mail = asset.get("mail") or []
+    for m in mail:
+        d = next((x for x in dns if x["domain"] == m["domain"]), None)
+        spoof = d is not None and d["spoofable"]
+        if m["filtered"] is False:
+            how = "no MX record points to Proofpoint" if m["profile"] == "unprotected" else "an MX record bypasses Proofpoint"
+            sev = "critical" if spoof or m["tier"] in ("critical", "high") else "warning"
+            out.append(_signal(sev, "MAIL_NOT_FILTERED", f"{m['domain']}: {how}, incoming mail is not filtered"
+                                                         + (f", and the domain can be impersonated (DMARC {d['dmarc']})" if spoof else ""),
+                               m["report"], m["hash"]))
+        if m["self_spoof"] and d is not None and d["dmarc_state"] != "enforced":
+            out.append(_signal("critical", "SELF_SPOOF_DELIVERED",
+                               f"{m['domain']}: {m['self_spoof']} malicious message(s) with the domain itself as sender were delivered "
+                               f"(last {m['self_spoof_when']}) and DMARC does not block them ({d['dmarc']})", m["report"], m["hash"]))
+    if asset.get("pp_assessed"):
+        covered = {m["domain"] for m in mail} | set(asset.get("pp_no_mail") or ())
+        for d in dns:
+            if d["profile"] == "mail" and d["domain"] not in covered:
+                out.append(_signal("warning", "MAIL_NOT_IN_PROOFPOINT", f"{d['domain']} receives mail but is not in the Proofpoint assessment",
+                                   d["report"], d["hash"]))
     for e in asset["expiries"]:
         days = e["days"]
         if days is None:
@@ -200,11 +244,15 @@ def _signals(asset: dict, now: datetime) -> List[dict]:
         out.append(_signal("warning", "WEB_NO_CAA", f"{d['domain']} publishes websites but no CAA record: any certificate "
                                                     "authority may issue certificates for it", d["dns_report"], d["hash"]))
     unknown = [d["domain"] for d in dns if not d["measured"] or d["dmarc_state"] == "unknown"] + \
-              [w["domain"] for w in web if not w["measured"] or w["protected"] is None]
+              [w["domain"] for w in web if not w["measured"] or w["protected"] is None] + \
+              [f"{m['domain']} (Proofpoint)" for m in mail if not m["measured"]]
     if unknown:
         out.append(_signal("info", "DATA_INCOMPLETE", f"Not verified: {', '.join(unknown[:3])}{' and others' if len(unknown) > 3 else ''} "
                                                       "(control not run, DNS or API error) - not counted as exposed",
-                           (dns[0] if dns else web[0])["report"], ""))
+                           (dns or web or mail)[0]["report"], ""))
+    if mail and not dns and not web and asset["dns_assessed"]:
+        out.append(_signal("warning", "DNS_NOT_MONITORED", f"{asset['key']} receives mail through Proofpoint but is not in the DNS / e-mail assessment",
+                           mail[0]["report"], mail[0]["hash"]))
     if web and not dns and asset["dns_assessed"]:
         out.append(_signal("warning", "DNS_NOT_MONITORED",
                            f"{asset['key']} hosts {len(web)} website{'s' if len(web) > 1 else ''} but is not in the DNS / e-mail assessment",
@@ -222,6 +270,8 @@ def build(reports: List[dict], now: Optional[datetime] = None) -> dict:
     dns_rows: List[Tuple[dict, str, str]] = []
     split: Dict[str, Dict[str, Tuple[dict, str]]] = {}
     waf_rows: List[Tuple[dict, str]] = []
+    pp_rows: List[Tuple[dict, str]] = []
+    pp_no_mail: set = set()
     tenants: List[Tuple[dict, dict]] = []
     for r in reports:
         p = r.get("payload")
@@ -233,11 +283,14 @@ def build(reports: List[dict], now: Optional[datetime] = None) -> dict:
                     split.setdefault(str(x["domain"]).lower(), {})[r["type"]] = (x, r["id"])
         elif r["type"] == "waf":
             waf_rows += [(x, r["id"]) for x in p.get("results") or [] if x.get("domain")]
+        elif r["type"] == "proofpoint":
+            pp_rows += [(x, r["id"]) for x in p.get("results") or [] if x.get("domain")]
+            pp_no_mail |= {str(d).lower() for d in p.get("no_mail") or []}
         elif r["type"] == "zta":
             tenants.append((p.get("tenant") or {}, r))
     for parts in split.values():
         dns_rows.append(_merge_domain(parts))
-    if not dns_rows and not waf_rows:
+    if not dns_rows and not waf_rows and not pp_rows:
         return {"assets": [], "summary": {"total": 0}}
 
     listed = sorted({str(x["domain"]).lower() for x, _, _ in dns_rows}, key=lambda d: (d.count("."), d))
@@ -248,7 +301,7 @@ def build(reports: List[dict], now: Optional[datetime] = None) -> dict:
     assets: Dict[str, dict] = {}
 
     def asset(key: str) -> dict:
-        return assets.setdefault(key, {"key": key, "dns": [], "web": [], "tenant": None, "expiries": []})
+        return assets.setdefault(key, {"key": key, "dns": [], "web": [], "mail": [], "tenant": None, "expiries": []})
 
     for x, rid, dns_rid in dns_rows:
         asset(roots[str(x["domain"]).lower()])["dns"].append(_dns_item(x, rid, dns_rid))
@@ -256,6 +309,10 @@ def build(reports: List[dict], now: Optional[datetime] = None) -> dict:
         host = str(x["domain"]).lower()
         match = max((d for d in listed if _under(host, d)), key=len, default=None)
         asset(roots[match] if match else registrable(host))["web"].append(_waf_item(x, rid))
+    for x, rid in pp_rows:
+        host = str(x["domain"]).lower()
+        match = max((d for d in listed if _under(host, d)), key=len, default=None)
+        asset(roots[match] if match else registrable(host))["mail"].append(_mail_item(x, rid))
     for t, r in tenants:
         dom = str(t.get("domain") or "").lower()
         key = next((k for k in assets if dom and _under(dom, k)), None)
@@ -280,8 +337,9 @@ def build(reports: List[dict], now: Optional[datetime] = None) -> dict:
                                       "report": d["dns_report"], "hash": d["hash"]})
         a["expiries"].sort(key=lambda e: (e["days"] is None, e["days"] if e["days"] is not None else 0))
         a["dns_assessed"] = bool(dns_rows)
+        a["pp_assessed"], a["pp_no_mail"] = bool(pp_rows), pp_no_mail
         a["signals"] = _signals(a, now)
-        items = a["dns"] + a["web"]
+        items = a["dns"] + a["web"] + a["mail"]
         a["tier"] = _tier(*(i["tier"] for i in items))
         a["owners"] = sorted({i["owner"] for i in items if i.get("owner")})
         a["bus"] = sorted({i["bu"] for i in items if i.get("bu")})
@@ -294,10 +352,11 @@ def build(reports: List[dict], now: Optional[datetime] = None) -> dict:
         a["status"] = ("bad" if "critical" in sev or (a["score"] is not None and a["score"] < 50) else
                        "warn" if "warning" in sev or (a["score"] is not None and a["score"] < 80) else
                        "good" if a["score"] is not None and not incomplete else "unknown")  # never "on track" on partial data
-        a["coverage_gap"] = any(s["code"] == "DNS_NOT_MONITORED" for s in a["signals"])
+        a["mail_score"] = min((m["score"] for m in a["mail"] if m["score"] is not None), default=None)
+        a["coverage_gap"] = any(s["code"] in ("DNS_NOT_MONITORED", "MAIL_NOT_IN_PROOFPOINT") for s in a["signals"])
         a["incomplete"] = any(s["code"] == "DATA_INCOMPLETE" for s in a["signals"])
         a["next_expiry"] = next((e for e in a["expiries"] if e["days"] is not None), None)
-        del a["dns_assessed"]
+        del a["dns_assessed"], a["pp_assessed"], a["pp_no_mail"]
         out.append(a)
     rank = {"bad": 0, "warn": 1, "unknown": 2, "good": 3}
     out.sort(key=lambda a: (rank[a["status"]], -TIER_RANK.get(a["tier"], 2),
@@ -307,6 +366,6 @@ def build(reports: List[dict], now: Optional[datetime] = None) -> dict:
                "attention": sum(a["status"] == "warn" for a in out), "on_track": sum(a["status"] == "good" for a in out),
                "coverage_gaps": sum(a["coverage_gap"] for a in out), "incomplete": sum(a["incomplete"] for a in out),
                "unknown": sum(a["status"] == "unknown" for a in out),
-               "websites": sum(len(a["web"]) for a in out), "domains": sum(len(a["dns"]) for a in out),
+               "websites": sum(len(a["web"]) for a in out), "mail_filtered": sum(len(a["mail"]) for a in out), "domains": sum(len(a["dns"]) for a in out),
                "expiring": sum(1 for a in out for e in a["expiries"] if e["days"] is not None and e["days"] <= CERT_WARN_DAYS)}
     return {"assets": out, "summary": summary}

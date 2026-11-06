@@ -86,6 +86,15 @@ def _remediation(r: ObjectResult) -> List[dict]:
     return out
 
 
+def _email(u: dict) -> str:
+    """The user's e-mail address, or the user name when it is one (SAML / directory users)."""
+    for v in (u.get("email_address"), u.get("username")):
+        v = str(v or "").strip().lower()
+        if "@" in v and "." in v.split("@")[-1]:
+            return v
+    return ""
+
+
 def analyze_snapshot(snap: dict, checks: List[str], inactive_days: int = INACTIVE_DAYS, self_client_id: Optional[str] = None,
                      limit: int = ALL_OBJECTS_LIMIT, now: Optional[datetime] = None
                      ) -> Tuple[List[ObjectResult], List[Issue], List[dict], dict]:
@@ -101,9 +110,10 @@ def analyze_snapshot(snap: dict, checks: List[str], inactive_days: int = INACTIV
     scan_date = snap.get("collected", "")
     results: List[ObjectResult] = []
 
-    def add(kind: str, oid, name: str, detail: str, per_check: Dict[str, Tuple[bool, List[Issue], dict]], tier: str = "medium"):
+    def add(kind: str, oid, name: str, detail: str, per_check: Dict[str, Tuple[bool, List[Issue], dict]], tier: str = "medium",
+            email: str = "", host: str = ""):
         r = ObjectResult(site_id=f"{kind}:{oid}", domain=name or f"{kind} {oid}", account_id=kind, account_name=KINDS[kind],
-                         kind=kind, detail=detail, scan_date=scan_date, tier=tier)
+                         kind=kind, detail=detail, scan_date=scan_date, tier=tier, email=email, host=host)
         for c in checks:
             applicable, issues, data = per_check.get(c, (False, [], {}))
             r.checks[c] = _check(issues, c, applicable, data)
@@ -149,7 +159,7 @@ def analyze_snapshot(snap: dict, checks: List[str], inactive_days: int = INACTIV
                                              "two_factor_type": u.get("two_factor_type")}),
              "privileges": (True, priv, {"admin": admin, "vault_admin": bool(u.get("perm_vault"))}),
              "lifecycle": (True, life, {"last_sign_in": u.get("last_authentication"), "days": last, "created": u.get("created_at")})},
-            tier="critical" if admin else "medium")
+            tier="critical" if admin else "medium", email=_email(u))
 
     # vendor users
     for v in snap.get("vendor_users") or []:
@@ -168,7 +178,7 @@ def analyze_snapshot(snap: dict, checks: List[str], inactive_days: int = INACTIV
              "privileges": (True, [make_issue("VENDOR_ADMIN")] if v.get("vendor_administrator") else [], {"vendor_admin": v.get("vendor_administrator")}),
              "lifecycle": (True, life, {"expires": v.get("account_expiration"), "last_sign_in": v.get("last_authenticated_date"),
                                         "days": last, "vendor": v.get("vendor")})},
-            tier="high")
+            tier="high", email=_email(v))
 
     # assets
     for a in snap.get("assets") or []:
@@ -200,7 +210,8 @@ def analyze_snapshot(snap: dict, checks: List[str], inactive_days: int = INACTIV
                                            "approval": (pol or {}).get("approval_required"), "schedule": (pol or {}).get("schedule_enabled"),
                                            "mfa_challenge": (pol or {}).get("two_factor_challenge_required"), "group_type": a.get("jump_group_type")}),
              "exposure": (True, exp, {"type": ASSET_TYPES.get(a.get("type")), "host": a.get("hostname"), "protocol": a.get("protocol"),
-                                      "tag": a.get("tag")})})
+                                      "tag": a.get("tag")})},
+            host=str(a.get("hostname") or "").strip().lower())
 
     # gateways
     for g in snap.get("gateways") or []:
