@@ -84,8 +84,8 @@ class RoutingTest(TempDirTest):
         self.assertTrue(pp.lookup_domain(dns, "alias.com", PROOFPOINT_HOSTS)["mx"][0]["how"].startswith("CNAME"))
         self.assertEqual(pp.lookup_domain(dns, "parked.com", PROOFPOINT_HOSTS)["mx_status"], "null")
         self.assertEqual(pp.m365_direct_host("my.co.uk"), "my-co-uk.mail.protection.outlook.com")
-        codes = {i.code for i in pp.check_routing(f).issues}
-        self.assertEqual(codes, {"MX_BYPASS_PREFERRED"})          # the bypass host has the lowest preference
+        routing = pp.check_routing(f)                             # routing is shown, not reported
+        self.assertEqual((routing.issues, routing.data["via_proofpoint"]), ([], "some"))
 
 
 class AnalysisTest(TempDirTest):
@@ -93,12 +93,13 @@ class AnalysisTest(TempDirTest):
         results, account, _, extra = analyze()
         r = {x.domain: x for x in results}
         self.assertEqual({k: v.profile for k, v in r.items()}, {
-            "contoso.com": "clicked", "fabrikam.com": "bypass", "northwind.com": "unprotected",
+            "contoso.com": "clicked", "fabrikam.com": "delivered", "northwind.com": "unprotected",
             "tailspin.com": "protected", "adatum.com": "protected"})
         codes = lambda d: {i.code for i in r[d].issues}
         self.assertTrue({"CLICK_PERMITTED", "THREAT_DELIVERED", "DIRECT_DELIVERY", "URL_NOT_REWRITTEN", "VAP_VIP"} <= codes("contoso.com"))
         self.assertLessEqual(r["contoso.com"].overall_score, 40)
-        self.assertTrue({"MX_BYPASS", "SAFELIST_DELIVERY", "SPF_NO_PROOFPOINT"} <= codes("fabrikam.com"))
+        self.assertTrue({"SAFELIST_DELIVERY", "SPF_NO_PROOFPOINT"} <= codes("fabrikam.com"))
+        self.assertFalse({c for d in r for c in codes(d)} & {"MX_NOT_PROOFPOINT", "MX_BYPASS", "MX_BYPASS_PREFERRED"})
         self.assertEqual(r["northwind.com"].checks["threats"].status, "na")   # TAP cannot see mail it does not filter
         self.assertNotIn("SPF_NO_PROOFPOINT", codes("northwind.com"))
         self.assertEqual(r["tailspin.com"].overall_score, 100)
@@ -222,7 +223,7 @@ class CliPortalTest(TempDirTest):
         r = portal.collect([self.path("pp.html")])[0][0]
         self.assertEqual((r["type"], r["label"], r["exec"]["status"]), ("proofpoint", "Proofpoint", "bad"))
         kpis = {k["key"]: k["value"] for k in r["exec"]["kpis"]}
-        self.assertEqual(kpis, {"pp_routing": 50, "pp_clicks": 1, "pp_delivered": 2, "pp_click_block": 75})
+        self.assertEqual(kpis, {"pp_clicks": 1, "pp_delivered": 2, "pp_click_block": 75})
         self.assertEqual(r["exec"]["actions"][0]["code"], "CLICK_PERMITTED")
         portal.compact_report(self.path("pp.html"))
         self.assertEqual(portal.report_page(portal.collect([self.path("pp.report.json")])[0][0]), page)

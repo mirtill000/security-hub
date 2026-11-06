@@ -57,20 +57,17 @@ const APP = {
   tool: 'PPGuard', subtitle: 'Proofpoint email protection', title: 'Proofpoint email protection posture',
   domSub: r => esc([r.gateway ? 'Gateway: ' + r.gateway : '', r._acc, r.source === 'tap' ? 'seen by TAP only' : '', r.owner, r.bu].filter(Boolean).join(', ')),
   profiles: {unprotected: 'Not routed via Proofpoint', bypass: 'MX bypass', clicked: 'Malicious click permitted', delivered: 'Threat delivered', protected: 'Protected'},
-  badges: {unprotected: 'Not routed via Proofpoint', bypass: 'MX bypass', clicked: 'Malicious click permitted', delivered: 'Threat delivered'},
+  badges: {clicked: 'Malicious click permitted', delivered: 'Threat delivered'},
   accountLabel: 'Mailbox',
   kpiFirst: (kpi, n) => kpi(n, 'mail domains assessed', '', 'data-route="domains"'),
   kpis: kpi => {
-    const bypass = R.filter(r => r.profile === 'unprotected' || r.profile === 'bypass').length;
-    return (bypass ? kpi(bypass, 'domains bypassing Proofpoint', 'k-fail', 'data-filter="finding" data-value="' + (R.some(r => r.profile === 'unprotected') ? 'MX_NOT_PROOFPOINT' : 'MX_BYPASS') + '"') : '')
+    return ''
       + (TAP ? kpi(TOT.malicious || 0, `malicious delivered, ${WIN.hours || ''}h`, (TOT.malicious ? 'k-fail' : 'k-pass'), 'data-route="policies"') : '')
       + (TAP ? kpi(TOT.clicks_permitted || 0, 'malicious clicks permitted', (TOT.clicks_permitted ? 'k-fail' : 'k-pass'), 'data-filter="finding" data-value="CLICK_PERMITTED"') : '');
   },
   accTitle: 'Organization findings', accSub: 'across the organization',
   presets: () => [
   ...(hasMeta && R.some(r => r.tier === 'critical') ? [['tier1', 'Critical tier', {tier: 'critical'}]] : []),
-  ...(R.some(r => r.profile === 'unprotected') ? [['unp', 'Not via Proofpoint', {profile: 'unprotected'}]] : []),
-  ...(R.some(r => r.profile === 'bypass') ? [['byp', 'MX bypass', {profile: 'bypass'}]] : []),
   ...(R.some(r => r._codes.has('DIRECT_DELIVERY')) ? [['dir', 'Direct delivery to verify', {finding: 'DIRECT_DELIVERY'}]] : []),
   ...(R.some(r => r._codes.has('CLICK_PERMITTED')) ? [['clk', 'Clicks permitted', {finding: 'CLICK_PERMITTED'}]] : []),
   ],

@@ -212,13 +212,6 @@ def _signals(asset: dict, now: datetime) -> List[dict]:
     mail = asset.get("mail") or []
     for m in mail:
         d = next((x for x in dns if x["domain"] == m["domain"]), None)
-        spoof = d is not None and d["spoofable"]
-        if m["filtered"] is False:
-            how = "no MX record points to Proofpoint" if m["profile"] == "unprotected" else "an MX record bypasses Proofpoint"
-            sev = "critical" if spoof or m["tier"] in ("critical", "high") else "warning"
-            out.append(_signal(sev, "MAIL_NOT_FILTERED", f"{m['domain']}: {how}, incoming mail is not filtered"
-                                                         + (f", and the domain can be impersonated (DMARC {d['dmarc']})" if spoof else ""),
-                               m["report"], m["hash"]))
         if m["self_spoof"] and d is not None and d["dmarc_state"] != "enforced":
             out.append(_signal("critical", "SELF_SPOOF_DELIVERED",
                                f"{m['domain']}: {m['self_spoof']} malicious message(s) with the domain itself as sender were delivered "

@@ -10,12 +10,6 @@ USER_AGENT = f"PPGuard/{__version__} (read-only posture assessment)"
 # code -> (severity, area, title, recommendation)
 FINDINGS: Dict[str, Tuple[str, str, str, str]] = {
     # mail routing (DNS)
-    "MX_NOT_PROOFPOINT": ("critical", "Routing", "Inbound mail does not go through Proofpoint",
-                          "Point every MX record to the Proofpoint hosts of your cluster (*.pphosted.com)"),
-    "MX_BYPASS": ("critical", "Routing", "MX records that bypass Proofpoint",
-                  "Remove the MX records not served by Proofpoint: attackers send to the unfiltered host on purpose"),
-    "MX_BYPASS_PREFERRED": ("critical", "Routing", "A host that bypasses Proofpoint is the preferred MX",
-                            "Give the Proofpoint MX the lowest preference value, then remove the others"),
     "MX_DNS_ERROR": ("warning", "Routing", "MX records could not be read",
                      "Check the authoritative name servers of the domain"),
     "DIRECT_DELIVERY": ("warning", "Direct delivery", "The mailbox service accepts mail directly, bypassing the MX",
@@ -120,7 +114,7 @@ CHECK_LABELS = {"routing": "Mail routing", "direct": "Direct delivery", "spf": "
                 "clicks": "Permitted clicks", "rewrite": "URL Defense", "people": "Attacked people"}
 CHECK_ALIASES = {"mx": "routing", "bypass": "direct", "tap": "threats", "click": "clicks", "vap": "people",
                  "url": "rewrite", "urldefense": "rewrite"}
-SCORE_CAPS = {"MX_NOT_PROOFPOINT": 30, "MX_BYPASS_PREFERRED": 30, "MX_BYPASS": 50, "CLICK_PERMITTED": 40,
+SCORE_CAPS = {"CLICK_PERMITTED": 40,
               "SAFELIST_DELIVERY": 50, "THREAT_DELIVERED": 60}
 
 FRAMEWORK_MAP: Dict[str, List[str]] = {

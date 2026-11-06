@@ -38,17 +38,12 @@ def check_routing(dns: Optional[dict]) -> CheckResult:
     if not mx:
         c.status = "na"
         return _finish(c, "routing")
+    # Which MX hosts are Proofpoint is shown, but not reported: domains whose mail does not (only) go through
+    # Proofpoint can be legitimate (other gateway, parked or third-party mail) and are not findings.
     pp = [m for m in mx if m.get("proofpoint")]
-    other = [m for m in mx if not m.get("proofpoint")]
+    c.data["via_proofpoint"] = "all" if len(pp) == len(mx) else "some" if pp else "none"
     if not pp:
-        plat = sorted({m.get("platform") or m["host"] for m in other})
-        c.issues.append(make_issue("MX_NOT_PROOFPOINT", ", ".join(plat[:3])))
-    elif other:
-        best = min(m["preference"] for m in mx)
-        if any(m["preference"] <= best for m in other):
-            c.issues.append(make_issue("MX_BYPASS_PREFERRED", ", ".join(f"{m['host']} ({m['preference']})" for m in other[:3])))
-        else:
-            c.issues.append(make_issue("MX_BYPASS", ", ".join(f"{m['host']} ({m['preference']})" for m in other[:3])))
+        c.status = "na"
     return _finish(c, "routing")
 
 

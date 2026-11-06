@@ -148,7 +148,7 @@ function mailTxt(a) {  // Proofpoint filtering of the asset's mail domains
   const m = a.mail || [];
   if (!m.length) return '';
   const nf = m.filter(x => x.filtered === false).length;
-  return `${SEP}${nf ? `<span class="tx-bad">${nf} not via Proofpoint</span>` : m.every(x => x.filtered) ? '<span class="tx-good">via Proofpoint</span>' : '<span class="faint">Proofpoint not verified</span>'}`;
+  return `${SEP}${nf ? `<span class="faint">${nf} not via Proofpoint</span>` : m.every(x => x.filtered) ? '<span class="tx-good">via Proofpoint</span>' : '<span class="faint">Proofpoint not verified</span>'}`;
 }
 const sigCount = a => { const c = a.signals.filter(x => x.severity === 'critical').length, w = a.signals.filter(x => x.severity === 'warning').length;
   return (c ? `<span class="pill s-fail">${c} critical</span> ` : '') + (w ? `<span class="pill s-warn">${w} warning</span>` : '') || '<span class="faint">none</span>'; };
@@ -239,7 +239,6 @@ const SIG_LABEL = {
   WEB_NO_CAA: 'Publish CAA records naming only the certificate authorities you use',
   DATA_INCOMPLETE: 'Re-run the assessment with every check, or fix the DNS / API errors shown in the report',
   DNS_NOT_MONITORED: 'Coverage gap: add the domain to the DNS / e-mail assessment',
-  MAIL_NOT_FILTERED: 'Point every MX record to Proofpoint and restrict direct delivery to the mailbox service',
   SELF_SPOOF_DELIVERED: 'Cross-area: attackers already use the domain as sender. Move DMARC to p=reject and review the Proofpoint spoofing rules',
   MAIL_NOT_IN_PROOFPOINT: 'Coverage gap: add the domain to the Proofpoint assessment, or route its mail through Proofpoint'};
 function assetsView() { return S.asset ? assetDetail(AS.find(a => a.key === S.asset)) : assetList(); }

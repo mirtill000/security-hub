@@ -101,13 +101,11 @@ class MailDomainTest(unittest.TestCase):
     def signals(self, reports):
         return {a["key"]: sorted(s["code"] for s in a["signals"]) for a in inventory.build(reports)["assets"]}
 
-    def test_unfiltered_and_spoofable_domain_is_critical(self):
+    def test_mail_not_via_proofpoint_is_not_a_signal(self):
         inv = inventory.build([self.dns(("contoso.com", "mail", "none")), pp(results=[self.pp_row("contoso.com", "unprotected")])])
         a = inv["assets"][0]
-        sig = {s["code"]: s for s in a["signals"]}
-        self.assertEqual(sig["MAIL_NOT_FILTERED"]["severity"], "critical")
-        self.assertIn("impersonated", sig["MAIL_NOT_FILTERED"]["text"])
-        self.assertEqual(a["mail"][0]["filtered"], False)
+        self.assertEqual(a["mail"][0]["filtered"], False)                    # shown in the asset
+        self.assertNotIn("MAIL_NOT_FILTERED", {s["code"] for s in a["signals"]})
         self.assertEqual(inv["summary"]["mail_filtered"], 1)
 
     def test_threat_delivered_with_own_domain_as_sender(self):

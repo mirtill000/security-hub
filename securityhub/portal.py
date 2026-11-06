@@ -460,14 +460,11 @@ def exec_edr(payload: dict) -> dict:
 
 
 def exec_proofpoint(payload: dict) -> dict:
-    """Email protection outcomes: mail really filtered by Proofpoint, threats that reached users, clicks allowed.
+    """Email protection outcomes: threats that reached users, clicks allowed, gateway enforcement (routing is informational).
     A domain whose routing could not be read is 'not verified'; TAP figures only when TAP was read."""
     rows = payload.get("results") or []
     st = lambda r, c: ((r.get("checks") or {}).get(c) or {}).get("status")
     codes = lambda r: {i.get("code") for i in r.get("issues") or []}
-    routed = [r for r in rows if st(r, "routing") in ("valid", "error", "warning")]
-    only_pp = [r for r in routed if st(r, "routing") == "valid"]
-    bypass = [r for r in routed if st(r, "routing") != "valid"]
     direct = [r for r in rows if "DIRECT_DELIVERY" in codes(r)]
     clicked = [r for r in rows if "CLICK_PERMITTED" in codes(r)]
     tap = bool(payload.get("tap"))
@@ -475,10 +472,6 @@ def exec_proofpoint(payload: dict) -> dict:
     hours = (payload.get("window") or {}).get("hours")
     users = sorted({u for r in clicked for u in (((r.get("checks") or {}).get("clicks") or {}).get("data") or {}).get("users") or []})
     kpis = []
-    if routed:
-        kpis.append(_kpi("pp_routing", "Mail domains filtered only by Proofpoint", _pct(len(only_pp), len(routed)), "%",
-                         f"{len(only_pp)} of {len(routed)} domains with every MX through Proofpoint", 100, area="proofpoint",
-                         hash_="#/domains?f=routing:error"))
     if tap:
         kpis.append(_kpi("pp_clicks", f"Users who clicked a malicious URL that was allowed ({hours}h)", len(users), "",
                          f"{tot.get('clicks_permitted', 0)} permitted clicks", 0, higher_is_better=False, area="proofpoint",
@@ -504,8 +497,7 @@ def exec_proofpoint(payload: dict) -> dict:
         kpis.append(_kpi("pp_url_rewrite", "URLs rewritten by URL Defense", url_cov, "%",
                          "Threat Protection report" if tp_url else "PoD message log", 100, area="proofpoint", hash_="#/policies"))
     vap = (payload.get("people") or {}).get("vap") or []
-    side = [["Domains bypassing Proofpoint", str(len(bypass)), "bad" if bypass else "good"],
-            ["Direct delivery to Microsoft 365 to verify", str(len(direct)), "warn" if direct else "good"]]
+    side = [["Direct delivery to Microsoft 365 to verify", str(len(direct)), "warn" if direct else "good"]]
     if tap:
         side += [["Users with a malicious click allowed", str(len(users)), "bad" if users else "good"],
                  ["Very Attacked People", str(len(vap)), "warn" if any(p.get("vip") for p in vap) else "good"]]
@@ -522,8 +514,6 @@ def exec_proofpoint(payload: dict) -> dict:
     if users:
         # possible account compromise: ranked first among the headlines of the portal
         head = (100, f"{len(users)} user{'s' if len(users) != 1 else ''} clicked a malicious URL that Proofpoint allowed")
-    elif bypass:
-        head = (_pct(len(bypass), len(routed)), f"{len(bypass)} of {len(routed)} mail domains can receive mail that skips Proofpoint")
     elif tot.get("malicious"):
         head = (None, f"{tot['malicious']} malicious message{'s' if tot['malicious'] != 1 else ''} reached users in {hours}h")
     actions = _asset_actions("proofpoint", payload, rows)
@@ -534,7 +524,7 @@ def exec_proofpoint(payload: dict) -> dict:
                             "impact": 40 if i["severity"] == "critical" else 10, "hash": "#/policies"})
     # a click on a malicious URL that was allowed is a possible compromise: it leads the action plan
     actions.sort(key=lambda a: (a["code"] != "CLICK_PERMITTED", -a["impact"], a["severity"] != "critical", str(a["code"])))
-    status = _status(score, bool(bypass or users or tot.get("malicious")))
+    status = _status(score, bool(users or tot.get("malicious")))
     if users and status != "unknown":
         status = "bad"
     return {"status": status, "kpis": kpis, "side": side,

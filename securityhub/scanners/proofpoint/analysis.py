@@ -99,13 +99,6 @@ def evaluate_compliance(r: MailDomainResult, checks: List[str]) -> Dict[str, str
 
 
 REMEDIATION = {
-    "MX_NOT_PROOFPOINT": ("Route inbound mail through Proofpoint", "DNS",
-                          "Replace the MX records with the Proofpoint hosts of your cluster (mx0a/mx0b-<id>.pphosted.com, "
-                          "see Proofpoint admin portal > Domains), then lower the TTL during the change"),
-    "MX_BYPASS": ("Remove the MX records that bypass Proofpoint", "DNS",
-                  "Delete the MX records not served by Proofpoint; keep only the pphosted.com hosts"),
-    "MX_BYPASS_PREFERRED": ("Make Proofpoint the only MX", "DNS",
-                            "Delete the MX records not served by Proofpoint (they currently receive mail first)"),
     "DIRECT_DELIVERY": ("Block direct delivery to Microsoft 365", "Exchange admin center",
                         "Mail flow > Connectors: inbound 'Partner organization' connector from Proofpoint, restricted to the "
                         "Proofpoint IPs or certificate; then a mail flow rule (or 'reject direct send') that rejects inbound "
@@ -199,8 +192,9 @@ def analyze_snapshot(snap: dict, checks: List[str], metadata: Dict[str, dict]
                 r.checks[c] = CheckResult(status="unknown", issues=[make_issue("API_ERROR", f"{c}: {type(e).__name__}: {e}")])
         r.issues = sorted((i for c in checks for i in r.checks[c].issues), key=lambda i: SEVERITY_RANK.get(i.severity, 9))
         codes = {i.code for i in r.issues}
-        r.profile = ("unprotected" if "MX_NOT_PROOFPOINT" in codes else "bypass" if codes & {"MX_BYPASS", "MX_BYPASS_PREFERRED"}
-                     else "clicked" if "CLICK_PERMITTED" in codes else "delivered" if "THREAT_DELIVERED" in codes else "protected")
+        via = ((r.checks.get("routing") or CheckResult()).data or {}).get("via_proofpoint")
+        r.profile = ("clicked" if "CLICK_PERMITTED" in codes else "delivered" if "THREAT_DELIVERED" in codes
+                     else "unprotected" if via == "none" else "bypass" if via == "some" else "protected")  # routing: informational
         score_domain(r, checks)
         r.compliance = evaluate_compliance(r, checks)
         r.remediation = suggest_remediation(r)
