@@ -2,6 +2,7 @@
    Included by each app before its own module data and APP config, then asset-app.js. */
 /* ================= data ================= */
 const D = JSON.parse(document.getElementById('mg-data').textContent);
+if (window.HUB_AREA && typeof window.HUB_AREA === 'object') D.area = window.HUB_AREA;   // inside the portal: its figures
 const R = D.results, CHECKS = D.checks, L = D.labels, M = D.meta || {};
 const FIND = D.findings, FW = D.frameworks, COMP = D.compliance;
 const ESC = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'};

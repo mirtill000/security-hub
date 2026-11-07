@@ -914,8 +914,14 @@ def area_summary(kind: str, payload: dict) -> Optional[dict]:
     if kind not in EXEC or kind == "zta":
         return None
     try:
-        summary = {"score": area_score(kind, payload), "exec": EXEC[kind](payload)}
-    except Exception:
+        try:
+            summary = {"score": area_score(kind, payload), "exec": EXEC[kind](payload)}
+        except (TypeError, AttributeError, KeyError, ValueError):
+            # the module's payload may still hold dates, tuples or objects: compute on the data as the portal reads it
+            payload = json.loads(json.dumps(payload, default=str))
+            summary = {"score": area_score(kind, payload), "exec": EXEC[kind](payload)}
+    except Exception as e:  # the report is still written; the portal gives it its figures when embedding it
+        print(f"Warning: area score of the {kind} report not computed ({type(e).__name__}: {e})", file=sys.stderr)
         return None
     raw = summary["score"]
     summary["score"] = round(raw) if raw is not None else None
@@ -946,6 +952,14 @@ def load_report(path: str, idx: int, keep: bool = True) -> dict:
         except Exception as e:
             print(f"Warning: executive metrics of {os.path.basename(path)} not available ({type(e).__name__}: {e})", file=sys.stderr)
     _align_score(summary)
+    if summary.get("score") is not None and kind in EXEC and kind != "zta":
+        raw = summary.get("score_uncapped", summary["score"])
+        area = {"score": summary["score"], "grade": grade(summary["score"]),
+                "status": (summary.get("exec") or {}).get("status"), "average": round(raw) if raw is not None else None,
+                "cap": summary.get("score_cap"), "split": summary.get("split")}
+        own = payload.get("area") if isinstance(payload, dict) else None
+        if not isinstance(own, dict) or any(own.get(k) != area[k] for k in ("score", "grade", "cap")):
+            summary["page_area"] = area     # older report, or its own figures could not be computed
     if not summary.get("generated"):
         summary["generated"] = datetime.fromtimestamp(os.path.getmtime(path), timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     when = parse_date(summary.get("generated", "")) or datetime.fromtimestamp(os.path.getmtime(path), timezone.utc)
@@ -1108,8 +1122,9 @@ def _html_json(text: str) -> str:
 def _write_page(f, r: dict) -> None:
     """Write the page of report `r` as a JSON string, rebuilding it from its file in chunks: a large report is never
     held in memory as a whole (nor its parsed data), whatever its size."""
+    inject = _area_script(r)
     if "html" in r:  # given by the caller
-        f.write(json_for_html(r["html"]))
+        f.write(json_for_html(r["html"].replace("<head>", "<head>" + inject, 1) if inject else r["html"]))
         return
     path = r["path"]
     f.write('"')
@@ -1132,7 +1147,7 @@ def _write_page(f, r: dict) -> None:
             template, css, js = page_parts(r["type"])
             pre, _, post = (template.replace("__TITLE__", html.escape(title or r["title"])).replace("__CSS__", css)
                             .replace("__JS__", js)).partition("__DATA__")
-            f.write(_enc(pre))
+            f.write(_enc(pre.replace("<head>", "<head>" + inject, 1) if inject else pre))
             buf = head[m.end():]
             while True:   # the data ends with the closing brace of the file: keep a short tail until the end
                 nxt = src.read(CHUNK)
@@ -1146,9 +1161,22 @@ def _write_page(f, r: dict) -> None:
             f.write(_enc(post))
     else:
         with open(path, encoding="utf-8", errors="replace") as src:
+            first = True
             for chunk in iter(lambda: src.read(CHUNK), ""):
+                if first and inject:
+                    chunk = chunk.replace("<head>", "<head>" + inject, 1)
+                first = False
                 f.write(_enc(chunk))
     f.write('"')
+
+
+def _area_script(r: dict) -> str:
+    """The area figures of the portal for the embedded report (window.HUB_AREA): a report written by an older version,
+    or whose own computation failed, still shows the same score, grade, cap and split as the portal card."""
+    a = r.get("page_area")
+    if not a:
+        return ""
+    return "<script>window.HUB_AREA=" + json_for_html(a) + ";</script>"
 
 
 def report_page(r: dict) -> str:
@@ -1204,7 +1232,7 @@ def build_hub(reports: List[dict], out: str, title: str, history: Optional[dict]
             "portfolio": portfolio(reports), "history": history or {"series": [], "runs": []},
             "inventory": joined["inventory"], "links": joined["links"], "health": health or {}}
     meta["exposed"] = exposed_now(reports, joined)
-    index = [{k: v for k, v in r.items() if k not in ("html", "payload", "path", "open_findings")} for r in reports]
+    index = [{k: v for k, v in r.items() if k not in ("html", "payload", "path", "open_findings", "page_area")} for r in reports]
     with atomic_open(out) as f:
         for part in HUB_MARKERS.split(HUB_TEMPLATE):
             if part == "__TITLE__":

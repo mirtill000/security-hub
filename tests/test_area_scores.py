@@ -1,5 +1,6 @@
 """Area score, grade and status tell the same story in the portal and posture.json."""
 
+import json
 import unittest
 
 from securityhub import portal
@@ -63,3 +64,26 @@ class ReportMatchesPortalTest(unittest.TestCase):
         card = portal.collect([out])[0][0]
         self.assertEqual((payload["area"]["score"], payload["area"]["grade"]), (card["score"], card["grade"]))
         self.assertTrue(payload["area"]["cap"])                    # an active threat caps the area: the report says so
+
+
+class PortalAreaInReportTest(unittest.TestCase):
+    def test_portal_gives_its_figures_to_a_report_without_area(self):
+        import tempfile, os, re as _re
+        from securityhub import cli, portal
+        from tests.helpers import fixture, silenced
+        with tempfile.TemporaryDirectory() as d:
+            with silenced():
+                cli.main(["edr", "--from-json", fixture("s1_snapshot.json"), "-o", os.path.join(d, "edr.html")])
+            with open(os.path.join(d, "edr.html"), encoding="utf-8") as f:
+                title, payload = portal.extract_report(f.read())
+            payload.pop("area")                                    # a report written by an older version
+            with open(os.path.join(d, "edr.html"), "w", encoding="utf-8") as f:
+                f.write(portal.build_page("edr", title, payload))
+            reports, _ = portal.collect([d])
+            page = portal.report_page(reports[0])
+            m = _re.search(r"window\.HUB_AREA=(\{.*?\});</script>", page)
+            self.assertIsNotNone(m)
+            area = json.loads(m.group(1))
+            self.assertEqual((area["score"], area["grade"]), (reports[0]["score"], reports[0]["grade"]))
+            self.assertEqual(area["cap"], reports[0].get("score_cap"))
+
